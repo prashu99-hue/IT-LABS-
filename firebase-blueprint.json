@@ -118,6 +118,12 @@
       "schema": "UserProfile",
       "description": "Collection of user profiles where document ID equals Firebase Authentication UID"
     },
+    "/users/{userId}/following/{targetUserId}": {
+      "description": "Subcollection tracking creators followed by a user"
+    },
+    "/users/{userId}/followers/{followerUserId}": {
+      "description": "Subcollection tracking followers of a user"
+    },
     "/posts/{postId}": {
       "schema": "Post",
       "description": "Collection of educational posts"

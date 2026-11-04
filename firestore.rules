@@ -50,6 +50,26 @@ service cloud.firestore {
 
       // Deletion: Admin only
       allow delete: if isAdmin();
+
+      // Following Subcollection: /users/{userId}/following/{targetUserId}
+      // Tracks who {userId} is following
+      match /following/{targetUserId} {
+        allow read: if true;
+        // Authenticated user can ONLY manage their own following records and cannot follow themselves
+        allow create: if isSignedIn() && request.auth.uid == userId && userId != targetUserId;
+        allow delete: if isSignedIn() && request.auth.uid == userId;
+        allow update: if false;
+      }
+
+      // Followers Subcollection: /users/{userId}/followers/{followerUserId}
+      // Tracks who follows {userId}
+      match /followers/{followerUserId} {
+        allow read: if true;
+        // Authenticated user can ONLY record/remove themselves as a follower and cannot follow themselves
+        allow create: if isSignedIn() && request.auth.uid == followerUserId && followerUserId != userId;
+        allow delete: if isSignedIn() && request.auth.uid == followerUserId;
+        allow update: if false;
+      }
     }
 
     // 2. Admins Collection (Restricted strictly to system administrators)

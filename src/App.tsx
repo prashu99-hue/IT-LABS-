@@ -27,11 +27,17 @@ import { CreatePostView } from './components/CreatePostView';
 import { SearchView } from './components/SearchView';
 import { SavedView } from './components/SavedView';
 import { AdminDashboardView } from './components/AdminDashboardView';
+import { CreatorDiscoveryView } from './components/CreatorDiscoveryView';
 import { ShareModal } from './components/ShareModal';
 import { MediaPreviewModal } from './components/MediaPreviewModal';
 import { FirestoreRulesModal } from './components/FirestoreRulesModal';
 import { Toast, ToastMessage } from './components/Toast';
 import { subscribeToFirebaseAuthState, logoutFirebase, fetchAllUsersFromFirestore } from './services/authService';
+import {
+  followCreatorInFirestore,
+  unfollowCreatorInFirestore,
+  fetchFollowedUserIdsFromFirestore
+} from './services/followService';
 import { auth } from './firebase/config';
 import {
   createPostInFirestore,
@@ -47,6 +53,7 @@ export default function App() {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [users, setUsers] = useState<User[]>(INITIAL_USERS);
   const [currentUser, setCurrentUser] = useState<User>(CURRENT_USER);
+  const [followedUserIds, setFollowedUserIds] = useState<Set<string>>(new Set());
   const [posts, setPosts] = useState<Post[]>(INITIAL_POSTS);
   const [searchQuery, setSearchQuery] = useState('');
   const [isFeedLoading, setIsFeedLoading] = useState(false);
@@ -116,6 +123,44 @@ export default function App() {
     }
     loadFirestoreUsers();
   }, []);
+
+  // Fetch followed user IDs when signed in to ensure persistence across page refreshes
+  useEffect(() => {
+    async function loadFollowedCreators() {
+      if (auth.currentUser) {
+        try {
+          const followedSet = await fetchFollowedUserIdsFromFirestore(auth.currentUser.uid);
+          setFollowedUserIds(followedSet);
+          // Sync with users list
+          setUsers((prevUsers) =>
+            prevUsers.map((u) => ({
+              ...u,
+              isFollowing: followedSet.has(u.id),
+            }))
+          );
+          // Sync with posts list
+          setPosts((prevPosts) =>
+            prevPosts.map((p) => {
+              const aId = p.authorId || p.author?.id;
+              return {
+                ...p,
+                author: {
+                  ...p.author,
+                  isFollowing: followedSet.has(aId),
+                },
+              };
+            })
+          );
+        } catch (err) {
+          console.warn('Could not load followed creators from Firestore:', err);
+        }
+      } else {
+        setFollowedUserIds(new Set());
+      }
+    }
+
+    loadFollowedCreators();
+  }, [isLoggedIn, currentUser.id]);
 
   // Fetch actual educational posts from Cloud Firestore
   const loadFeedPosts = useCallback(async () => {
@@ -207,36 +252,82 @@ export default function App() {
     );
   };
 
-  // Follow Toggle
-  const handleFollowToggle = (userId: string) => {
+  // Real Firebase-backed Follow / Unfollow System (Feature 2)
+  const handleFollowToggle = async (userId: string) => {
+    if (!isLoggedIn || !auth.currentUser) {
+      showToast('Please sign in or register to follow educational creators.', 'info');
+      setCurrentView('auth');
+      return;
+    }
+
+    // Feature 2 Requirement: Prevent users from following themselves
+    if (userId === currentUser.id || userId === auth.currentUser.uid) {
+      showToast('You cannot follow yourself.', 'info');
+      return;
+    }
+
+    const targetUser = users.find((u) => u.id === userId);
+    if (!targetUser) return;
+
+    const currentlyFollowing = followedUserIds.has(userId) || !!targetUser.isFollowing;
+    const nextFollowing = !currentlyFollowing;
+
+    // Optimistically update followedUserIds Set
+    setFollowedUserIds((prev) => {
+      const nextSet = new Set(prev);
+      if (nextFollowing) {
+        nextSet.add(userId);
+      } else {
+        nextSet.delete(userId);
+      }
+      return nextSet;
+    });
+
+    // Optimistically update currentUser's followingCount
+    setCurrentUser((prev) => ({
+      ...prev,
+      followingCount: nextFollowing
+        ? (prev.followingCount || 0) + 1
+        : Math.max(0, (prev.followingCount || 1) - 1),
+    }));
+
+    // Optimistically update users list
     setUsers((prevUsers) =>
       prevUsers.map((u) => {
         if (u.id === userId) {
-          const nextFollow = !u.isFollowing;
-          showToast(nextFollow ? `You are now following ${u.name}` : `Unfollowed ${u.name}`, 'info');
           return {
             ...u,
-            isFollowing: nextFollow,
-            followersCount: nextFollow ? u.followersCount + 1 : Math.max(0, u.followersCount - 1),
+            isFollowing: nextFollowing,
+            followersCount: nextFollowing
+              ? (u.followersCount || 0) + 1
+              : Math.max(0, (u.followersCount || 1) - 1),
+          };
+        }
+        if (u.id === currentUser.id) {
+          return {
+            ...u,
+            followingCount: nextFollowing
+              ? (u.followingCount || 0) + 1
+              : Math.max(0, (u.followingCount || 1) - 1),
           };
         }
         return u;
       })
     );
 
-    // Update posts author if matches
+    // Optimistically update posts author info
     setPosts((prevPosts) =>
       prevPosts.map((p) => {
-        if (p.author.id === userId) {
-          const nextFollow = !p.author.isFollowing;
+        const authorId = p.authorId || p.author?.id;
+        if (authorId === userId) {
           return {
             ...p,
             author: {
               ...p.author,
-              isFollowing: nextFollow,
-              followersCount: nextFollow
-                ? p.author.followersCount + 1
-                : Math.max(0, p.author.followersCount - 1),
+              isFollowing: nextFollowing,
+              followersCount: nextFollowing
+                ? (p.author.followersCount || 0) + 1
+                : Math.max(0, (p.author.followersCount || 1) - 1),
             },
           };
         }
@@ -244,14 +335,107 @@ export default function App() {
       })
     );
 
+    // Optimistically update viewedUser if viewing their profile
     if (viewedUser.id === userId) {
       setViewedUser((prev) => ({
         ...prev,
-        isFollowing: !prev.isFollowing,
-        followersCount: !prev.isFollowing
-          ? prev.followersCount + 1
-          : Math.max(0, prev.followersCount - 1),
+        isFollowing: nextFollowing,
+        followersCount: nextFollowing
+          ? (prev.followersCount || 0) + 1
+          : Math.max(0, (prev.followersCount || 1) - 1),
       }));
+    }
+
+    // Persist relationship in Cloud Firestore
+    try {
+      if (nextFollowing) {
+        await followCreatorInFirestore(currentUser, targetUser);
+        showToast(`You are now following ${targetUser.name}`, 'info');
+      } else {
+        await unfollowCreatorInFirestore(currentUser.id, userId);
+        showToast(`Unfollowed ${targetUser.name}`, 'info');
+      }
+    } catch (err: any) {
+      console.warn('Follow synchronization error:', err);
+      // Revert optimistic updates on error
+      setFollowedUserIds((prev) => {
+        const revertedSet = new Set(prev);
+        if (currentlyFollowing) {
+          revertedSet.add(userId);
+        } else {
+          revertedSet.delete(userId);
+        }
+        return revertedSet;
+      });
+
+      setUsers((prevUsers) =>
+        prevUsers.map((u) => {
+          if (u.id === userId) {
+            return {
+              ...u,
+              isFollowing: currentlyFollowing,
+              followersCount: currentlyFollowing
+                ? (u.followersCount || 0) + 1
+                : Math.max(0, (u.followersCount || 1) - 1),
+            };
+          }
+          if (u.id === currentUser.id) {
+            return {
+              ...u,
+              followingCount: currentlyFollowing
+                ? (u.followingCount || 0) + 1
+                : Math.max(0, (u.followingCount || 1) - 1),
+            };
+          }
+          return u;
+        })
+      );
+
+      // Revert posts author info
+      setPosts((prevPosts) =>
+        prevPosts.map((p) => {
+          const authorId = p.authorId || p.author?.id;
+          if (authorId === userId) {
+            return {
+              ...p,
+              author: {
+                ...p.author,
+                isFollowing: currentlyFollowing,
+                followersCount: currentlyFollowing
+                  ? (p.author.followersCount || 0) + 1
+                  : Math.max(0, (p.author.followersCount || 1) - 1),
+              },
+            };
+          }
+          return p;
+        })
+      );
+
+      // Revert viewedUser if viewing their profile
+      if (viewedUser.id === userId) {
+        setViewedUser((prev) => ({
+          ...prev,
+          isFollowing: currentlyFollowing,
+          followersCount: currentlyFollowing
+            ? (prev.followersCount || 0) + 1
+            : Math.max(0, (prev.followersCount || 1) - 1),
+        }));
+      }
+
+      const isPermissionDenied =
+        err?.code === 'permission-denied' ||
+        (typeof err?.message === 'string' &&
+          (err.message.includes('insufficient permissions') ||
+           err.message.includes('permission-denied') ||
+           err.message.includes('Missing or insufficient permissions')));
+
+      if (isPermissionDenied) {
+        setRulesErrorPath(err?.failedPath || 'users/{userId}/following & /users/{userId}/followers');
+        setRulesModalOpen(true);
+        showToast('Firestore Permission Denied: Security rules for following/followers must be published in Firebase Console.', 'error');
+      } else {
+        showToast(`Could not sync follow status: ${err?.message || 'Permission denied'}`, 'error');
+      }
     }
   };
 
@@ -679,6 +863,8 @@ export default function App() {
                   isLoading={isFeedLoading}
                   error={feedError}
                   onRetry={loadFeedPosts}
+                  followedUserIds={followedUserIds}
+                  onDiscoverCreators={() => setCurrentView('creators')}
                 />
               )}
 
@@ -703,11 +889,26 @@ export default function App() {
                 />
               )}
 
+              {currentView === 'creators' && (
+                <CreatorDiscoveryView
+                  creators={users}
+                  currentUser={currentUser}
+                  posts={posts}
+                  followedUserIds={followedUserIds}
+                  onFollowToggle={handleFollowToggle}
+                  onSelectUser={handleSelectUser}
+                  onSelectCategory={handleSelectCategory}
+                  onToast={showToast}
+                />
+              )}
+
               {currentView === 'profile' && (
                 <ProfileView
                   user={viewedUser}
                   currentUser={currentUser}
                   allPosts={posts}
+                  creators={users}
+                  followedUserIds={followedUserIds}
                   onFollowToggle={handleFollowToggle}
                   onLikeToggle={handleLikeToggle}
                   onSaveToggle={handleSaveToggle}
@@ -744,6 +945,7 @@ export default function App() {
                   posts={posts}
                   creators={users}
                   currentUser={currentUser}
+                  followedUserIds={followedUserIds}
                   onLikeToggle={handleLikeToggle}
                   onSaveToggle={handleSaveToggle}
                   onFollowToggle={handleFollowToggle}

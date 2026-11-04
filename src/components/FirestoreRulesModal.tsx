@@ -47,6 +47,20 @@ service cloud.firestore {
                        request.resource.data.id == resource.data.id &&
                        (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['isAdmin']) || isAdmin());
       allow delete: if isAdmin();
+
+      match /following/{targetUserId} {
+        allow read: if true;
+        allow create: if isSignedIn() && request.auth.uid == userId && userId != targetUserId;
+        allow delete: if isSignedIn() && request.auth.uid == userId;
+        allow update: if false;
+      }
+
+      match /followers/{followerUserId} {
+        allow read: if true;
+        allow create: if isSignedIn() && request.auth.uid == followerUserId && followerUserId != userId;
+        allow delete: if isSignedIn() && request.auth.uid == followerUserId;
+        allow update: if false;
+      }
     }
 
     match /admins/{adminId} {
@@ -143,7 +157,7 @@ export const FirestoreRulesModal: React.FC<FirestoreRulesModalProps> = ({
           <div className="p-3 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 flex items-start gap-2.5">
             <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
             <div className="leading-relaxed">
-              Cloud Firestore blocked the post write because your remote Firebase project has not yet had rules published for the <span className="font-mono font-semibold">posts</span> collection. Follow the 2 steps below to enable publishing.
+              Cloud Firestore blocked the request because your remote Firebase project has not yet had security rules published for {errorPath ? <span className="font-mono font-semibold">{errorPath}</span> : 'all collections'}. Follow the 2 steps below to enable access.
             </div>
           </div>
 

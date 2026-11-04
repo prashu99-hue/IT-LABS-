@@ -1,5 +1,5 @@
 import React from 'react';
-import { Home, Compass, PlusCircle, Bookmark, User as UserIcon } from 'lucide-react';
+import { Home, Compass, PlusCircle, Users, User as UserIcon } from 'lucide-react';
 import { AppView } from '../types';
 
 interface MobileNavProps {
@@ -41,20 +41,13 @@ export const MobileNav: React.FC<MobileNavProps> = ({ currentView, onNavigate, s
         </button>
 
         <button
-          onClick={() => onNavigate('saved')}
-          className={`flex flex-col items-center gap-1 p-1 text-[11px] font-medium transition-colors relative ${
-            currentView === 'saved' ? 'text-blue-600 font-bold' : 'text-slate-500 hover:text-slate-900'
+          onClick={() => onNavigate('creators')}
+          className={`flex flex-col items-center gap-1 p-1 text-[11px] font-medium transition-colors ${
+            currentView === 'creators' ? 'text-blue-600 font-bold' : 'text-slate-500 hover:text-slate-900'
           }`}
         >
-          <div className="relative">
-            <Bookmark className="w-5 h-5" />
-            {savedCount > 0 && (
-              <span className="absolute -top-1 -right-2 bg-blue-600 text-white text-[9px] font-bold rounded-full w-4 h-4 flex items-center justify-center">
-                {savedCount}
-              </span>
-            )}
-          </div>
-          <span>Saved</span>
+          <Users className="w-5 h-5" />
+          <span>Creators</span>
         </button>
 
         <button

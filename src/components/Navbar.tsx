@@ -169,6 +169,16 @@ export const Navbar: React.FC<NavbarProps> = ({
                     Explore
                   </button>
                   <button
+                    onClick={() => onNavigate('creators')}
+                    className={`px-3 py-1.5 rounded-lg transition-colors ${
+                      currentView === 'creators'
+                        ? 'bg-blue-50 text-blue-700 font-semibold'
+                        : 'hover:text-slate-900 hover:bg-slate-50'
+                    }`}
+                  >
+                    Creators
+                  </button>
+                  <button
                     onClick={() => onNavigate('saved')}
                     className={`px-3 py-1.5 rounded-lg transition-colors ${
                       currentView === 'saved'

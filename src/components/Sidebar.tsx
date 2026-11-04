@@ -13,7 +13,8 @@ import {
   Database,
   Lock,
   Layers,
-  GraduationCap
+  GraduationCap,
+  Users
 } from 'lucide-react';
 import { AppView, SubjectCategory, User } from '../types';
 import { POPULAR_SUBJECTS } from '../data/mockData';
@@ -91,6 +92,23 @@ export const Sidebar: React.FC<SidebarProps> = ({
               </div>
               <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-blue-100 text-blue-800">
                 9 Subjects
+              </span>
+            </button>
+
+            <button
+              onClick={() => onNavigate('creators')}
+              className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl text-sm font-medium transition-all ${
+                currentView === 'creators'
+                  ? 'bg-blue-50 text-blue-700 font-semibold shadow-xs'
+                  : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
+              }`}
+            >
+              <div className="flex items-center gap-3">
+                <Users className="w-4 h-4" />
+                <span>Find Creators</span>
+              </div>
+              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700">
+                Scholars
               </span>
             </button>
 

@@ -138,6 +138,7 @@ export type AppView =
   | 'landing'
   | 'feed'
   | 'explore'
+  | 'creators'
   | 'create'
   | 'search'
   | 'saved'

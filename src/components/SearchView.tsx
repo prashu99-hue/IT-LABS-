@@ -32,6 +32,7 @@ interface SearchViewProps {
   posts: Post[];
   creators: User[];
   currentUser: User;
+  followedUserIds?: Set<string>;
   onLikeToggle: (postId: string) => void;
   onSaveToggle: (postId: string) => void;
   onFollowToggle: (userId: string) => void;
@@ -55,6 +56,7 @@ export const SearchView: React.FC<SearchViewProps> = ({
   posts,
   creators,
   currentUser,
+  followedUserIds = new Set<string>(),
   onLikeToggle,
   onSaveToggle,
   onFollowToggle,
@@ -588,16 +590,18 @@ export const SearchView: React.FC<SearchViewProps> = ({
                     </div>
                   </button>
 
-                  <button
-                    onClick={() => onFollowToggle(creator.id)}
-                    className={`text-xs px-3 py-1.5 rounded-xl font-semibold transition-colors shrink-0 shadow-xs ${
-                      creator.isFollowing
-                        ? 'bg-slate-200 text-slate-700 hover:bg-slate-300'
-                        : 'bg-blue-600 text-white hover:bg-blue-700'
-                    }`}
-                  >
-                    {creator.isFollowing ? 'Following' : 'Follow'}
-                  </button>
+                  {creator.id !== currentUser.id && (
+                    <button
+                      onClick={() => onFollowToggle(creator.id)}
+                      className={`text-xs px-3 py-1.5 rounded-xl font-semibold transition-colors shrink-0 shadow-xs ${
+                        (followedUserIds.has(creator.id) || creator.isFollowing)
+                          ? 'bg-slate-200 text-slate-700 hover:bg-slate-300'
+                          : 'bg-blue-600 text-white hover:bg-blue-700'
+                      }`}
+                    >
+                      {(followedUserIds.has(creator.id) || creator.isFollowing) ? 'Following' : 'Follow'}
+                    </button>
+                  )}
                 </div>
               ))}
             </div>
