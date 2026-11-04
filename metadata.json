@@ -1,0 +1,6 @@
+{
+  "name": "IT LABS – Learn, Share, Grow",
+  "description": "Educational social networking platform connecting students, teachers, professionals, and tech content creators.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

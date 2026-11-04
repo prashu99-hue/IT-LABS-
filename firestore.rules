@@ -1,0 +1,114 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Helper functions
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isAdmin() {
+      return isSignedIn() && (
+        request.auth.token.email == 'ecode2544@gmail.com' ||
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+      );
+    }
+
+    // Validate user profile schema
+    function isValidUserProfile(data) {
+      return data.name is string && data.name.size() > 0 && data.name.size() <= 120 &&
+             data.email is string &&
+             (data.role == 'student' || data.role == 'teacher_expert') &&
+             (!('bio' in data) || (data.bio is string && data.bio.size() <= 2000)) &&
+             (!('institution' in data) || (data.institution is string && data.institution.size() <= 200)) &&
+             (!('title' in data) || (data.title is string && data.title.size() <= 150));
+    }
+
+    // 1. User Profiles Collection
+    // Document ID matches the Firebase Auth UID
+    match /users/{userId} {
+      // Anyone can read profiles so post authors and explore educator profiles are discoverable
+      allow read: if true;
+
+      // Creation: Authenticated user can ONLY create their own profile document
+      // Users cannot grant themselves admin status (isAdmin must be false or omitted)
+      allow create: if isOwner(userId) &&
+                       isValidUserProfile(request.resource.data) &&
+                       request.resource.data.id == request.auth.uid &&
+                       (!('isAdmin' in request.resource.data) || request.resource.data.isAdmin == false);
+
+      // Update: Users can only update their own profile; cannot self-promote to admin or alter id
+      allow update: if isOwner(userId) &&
+                       isValidUserProfile(request.resource.data) &&
+                       request.resource.data.id == resource.data.id &&
+                       (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['isAdmin']) || isAdmin());
+
+      // Deletion: Admin only
+      allow delete: if isAdmin();
+    }
+
+    // 2. Admins Collection (Restricted strictly to system administrators)
+    match /admins/{adminId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    // 3. Educational Posts Collection
+    // Path: /posts/{postId}
+    match /posts/{postId} {
+      // Anyone can read educational posts (supports public feed & explore discovery)
+      allow read: if true;
+
+      // Creation: Authenticated user must set authorId to their own UID
+      allow create: if isSignedIn() &&
+                       request.resource.data.authorId == request.auth.uid &&
+                       request.resource.data.title is string &&
+                       request.resource.data.title.size() > 0 &&
+                       request.resource.data.description is string &&
+                       request.resource.data.description.size() > 0 &&
+                       (!('category' in request.resource.data) || request.resource.data.category is string) &&
+                       (!('difficulty' in request.resource.data) || request.resource.data.difficulty is string);
+
+      // Update:
+      // - Post author can edit their own post without changing authorId
+      // - Authenticated community members can update interaction counters (likesCount, commentsCount, savesCount, updatedAt)
+      // - Admins can moderate content
+      allow update: if isSignedIn() && (
+        (resource.data.authorId == request.auth.uid && request.resource.data.authorId == resource.data.authorId) ||
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['likesCount', 'commentsCount', 'savesCount', 'updatedAt']) ||
+        isAdmin()
+      );
+
+      // Deletion: Only the original post author or an administrator
+      allow delete: if isSignedIn() && (resource.data.authorId == request.auth.uid || isAdmin());
+
+      // 4. Likes Subcollection
+      // Path: /posts/{postId}/likes/{userId}
+      match /likes/{userId} {
+        allow read: if true;
+        // User can only create or delete their own like entry
+        allow create, delete: if isSignedIn() && request.auth.uid == userId;
+        allow update: if false;
+      }
+
+      // 5. Comments Subcollection
+      // Path: /posts/{postId}/comments/{commentId}
+      match /comments/{commentId} {
+        allow read: if true;
+        // Authenticated users can create comments under their own UID as authorId
+        allow create: if isSignedIn() &&
+                         request.resource.data.authorId == request.auth.uid &&
+                         request.resource.data.postId == postId &&
+                         request.resource.data.content is string &&
+                         request.resource.data.content.size() > 0;
+        // Comment author or admin can edit/delete comment
+        allow update, delete: if isSignedIn() && (resource.data.authorId == request.auth.uid || isAdmin());
+      }
+    }
+  }
+}

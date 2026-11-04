@@ -1,0 +1,133 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "User profile document stored in Firestore keyed by Firebase Auth UID",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Firebase Auth UID matching the document ID"
+        },
+        "name": {
+          "type": "string",
+          "description": "Full name of the user",
+          "maxLength": 100
+        },
+        "username": {
+          "type": "string",
+          "description": "Unique username handle",
+          "maxLength": 50
+        },
+        "email": {
+          "type": "string",
+          "format": "email",
+          "description": "User email address matching auth"
+        },
+        "role": {
+          "type": "string",
+          "enum": ["student", "teacher_expert"],
+          "description": "User role (Student or Teacher/Expert)"
+        },
+        "title": {
+          "type": "string",
+          "description": "Professional or academic title",
+          "maxLength": 120
+        },
+        "institution": {
+          "type": "string",
+          "description": "University, college, or organization",
+          "maxLength": 150
+        },
+        "bio": {
+          "type": "string",
+          "description": "User academic or professional biography",
+          "maxLength": 1000
+        },
+        "expertise": {
+          "type": "array",
+          "description": "Array of subject expertise tags"
+        },
+        "avatar": {
+          "type": "string",
+          "description": "Avatar image URL"
+        },
+        "followersCount": {
+          "type": "number",
+          "description": "Total followers count"
+        },
+        "followingCount": {
+          "type": "number",
+          "description": "Total following count"
+        },
+        "isVerified": {
+          "type": "boolean",
+          "description": "Whether the user is a verified educator"
+        },
+        "isAdmin": {
+          "type": "boolean",
+          "description": "Administrative privileges (cannot be self-assigned)"
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "Timestamp when the profile was registered"
+        },
+        "updatedAt": {
+          "type": "string",
+          "description": "Timestamp when the profile was last modified"
+        }
+    },
+    "Post": {
+      "title": "Post",
+      "description": "Educational post document in Firestore",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "authorId": { "type": "string" },
+        "authorName": { "type": "string" },
+        "authorPhoto": { "type": "string" },
+        "authorRole": { "type": "string" },
+        "authorInstitution": { "type": "string" },
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "category": { "type": "string" },
+        "difficulty": { "type": "string", "enum": ["Beginner", "Intermediate", "Advanced"] },
+        "tags": { "type": "array" },
+        "resourceUrl": { "type": "string" },
+        "likesCount": { "type": "number" },
+        "commentsCount": { "type": "number" }
+      },
+      "required": ["id", "authorId", "title", "description", "category", "difficulty"]
+    },
+    "Comment": {
+      "title": "Comment",
+      "description": "Comment subcollection on an educational post",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "postId": { "type": "string" },
+        "authorId": { "type": "string" },
+        "authorName": { "type": "string" },
+        "content": { "type": "string" }
+      },
+      "required": ["id", "postId", "authorId", "content"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "UserProfile",
+      "description": "Collection of user profiles where document ID equals Firebase Authentication UID"
+    },
+    "/posts/{postId}": {
+      "schema": "Post",
+      "description": "Collection of educational posts"
+    },
+    "/posts/{postId}/likes/{userId}": {
+      "description": "Subcollection tracking unique user likes per post"
+    },
+    "/posts/{postId}/comments/{commentId}": {
+      "schema": "Comment",
+      "description": "Subcollection of comments on an educational post"
+    }
+  }
+}
