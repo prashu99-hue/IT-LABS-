@@ -337,7 +337,16 @@ export async function uploadToAppServer(
   file: File,
   optimizedDataUrl?: string,
   onProgress?: (progress: number) => void
-): Promise<{ url: string; permanentFileUrl: string; size: number; storageProvider: string; fileName: string }> {
+): Promise<{
+  url: string;
+  permanentFileUrl: string;
+  size: number;
+  storageProvider: string;
+  fileName: string;
+  cloudinaryPublicId?: string;
+  cloudinaryResourceType?: string;
+  format?: string;
+}> {
   let fileData = optimizedDataUrl;
 
   if (!fileData) {
@@ -381,15 +390,21 @@ export async function uploadToAppServer(
     permanentFileUrl: data.permanentFileUrl || data.url,
     size: data.size || file.size,
     fileName: data.fileName || file.name,
-    storageProvider: data.storageProvider || 'IT LABS Server Storage',
+    storageProvider: data.storageProvider || 'Cloudinary Cloud Storage',
+    cloudinaryPublicId: data.cloudinaryPublicId,
+    cloudinaryResourceType: data.cloudinaryResourceType,
+    format: data.format,
   };
 }
 
 /**
  * Delete media files from server storage when a post is deleted
  */
-export async function deleteMediaFromServer(urlsOrFileNames: string[]): Promise<boolean> {
-  if (!urlsOrFileNames || urlsOrFileNames.length === 0) return true;
+export async function deleteMediaFromServer(
+  urlsOrFileNames: string[],
+  publicIds?: string[]
+): Promise<boolean> {
+  if ((!urlsOrFileNames || urlsOrFileNames.length === 0) && (!publicIds || publicIds.length === 0)) return true;
   try {
     const response = await fetch('/api/delete-media', {
       method: 'POST',
@@ -399,6 +414,7 @@ export async function deleteMediaFromServer(urlsOrFileNames: string[]): Promise<
       body: JSON.stringify({
         urls: urlsOrFileNames,
         fileNames: urlsOrFileNames,
+        publicIds: publicIds || [],
       }),
     });
     return response.ok;
@@ -416,6 +432,8 @@ export async function deleteAttachmentFromServer(params: {
   attachmentId: string;
   fileName?: string;
   fileUrl?: string;
+  cloudinaryPublicId?: string;
+  cloudinaryResourceType?: string;
   userId: string;
   userEmail?: string;
 }): Promise<boolean> {
@@ -452,10 +470,17 @@ export async function deleteAttachmentFromServer(params: {
 export async function uploadImageToPersistentStorage(
   file: File,
   onProgress?: (progress: number) => void
-): Promise<{ permanentUrl: string; provider: string; sizeFormatted: string }> {
+): Promise<{
+  permanentUrl: string;
+  provider: string;
+  sizeFormatted: string;
+  cloudinaryPublicId?: string;
+  cloudinaryResourceType?: string;
+  format?: string;
+}> {
   const config = getStorageConfig();
 
-  // 1. If Cloudinary is configured, use its global CDN
+  // 1. If direct Cloudinary preset is configured in client
   if (config.cloudinaryCloudName && config.cloudinaryUploadPreset) {
     try {
       const url = await uploadToCloudinary(
@@ -466,29 +491,16 @@ export async function uploadImageToPersistentStorage(
       );
       return {
         permanentUrl: url,
-        provider: 'Cloudinary CDN',
+        provider: 'Cloudinary Cloud Storage',
         sizeFormatted: formatFileSize(file.size),
+        cloudinaryResourceType: 'image',
       };
     } catch (cErr: any) {
-      console.warn('Cloudinary upload warning, trying server fallback:', cErr);
+      console.warn('Direct Cloudinary preset upload warning, trying server upload:', cErr);
     }
   }
 
-  // 2. If ImgBB is configured, use ImgBB
-  if (config.imgbbApiKey) {
-    try {
-      const url = await uploadToImgBB(file, config.imgbbApiKey, onProgress);
-      return {
-        permanentUrl: url,
-        provider: 'ImgBB Cloud',
-        sizeFormatted: formatFileSize(file.size),
-      };
-    } catch (iErr: any) {
-      console.warn('ImgBB upload warning, trying server fallback:', iErr);
-    }
-  }
-
-  // 3. Try App Server Persistent Storage (/api/upload-media)
+  // 2. Client image optimization before streaming
   let optimized;
   try {
     optimized = await optimizeImageClient(file, 1400, 1400, 0.82);
@@ -496,28 +508,32 @@ export async function uploadImageToPersistentStorage(
     console.warn('Client image optimization warning:', optErr);
   }
 
+  // 3. App Server Signed Cloudinary Storage (/api/upload-media)
   try {
     const uploadResult = await uploadToAppServer(file, optimized?.dataUrl, onProgress);
     return {
       permanentUrl: uploadResult.permanentFileUrl,
       provider: uploadResult.storageProvider,
       sizeFormatted: formatFileSize(optimized?.sizeBytes || file.size),
+      cloudinaryPublicId: uploadResult.cloudinaryPublicId,
+      cloudinaryResourceType: uploadResult.cloudinaryResourceType,
+      format: uploadResult.format,
     };
   } catch (serverErr: any) {
-    console.warn('App server storage upload encountered issue, using optimized WebP fallback:', serverErr);
+    console.warn('Server storage upload encountered issue, checking client fallbacks:', serverErr);
 
-    // 4. Client-optimized WebP fallback (< 80KB)
+    // 4. Client-optimized WebP fallback (< 80KB) for small images
     if (optimized && optimized.sizeBytes < 250 * 1024) {
       if (onProgress) onProgress(100);
       return {
         permanentUrl: optimized.dataUrl,
-        provider: 'Optimized WebP (<80KB)',
+        provider: 'Optimized Data URI (<80KB)',
         sizeFormatted: formatFileSize(optimized.sizeBytes),
       };
     }
 
     throw new Error(
-      `Failed to upload image to persistent storage: ${serverErr.message || 'Server error'}. Please check your connection.`
+      `Failed to upload image to persistent cloud storage: ${serverErr.message || 'Server error'}. Please verify Cloudinary credentials in .env.`
     );
   }
 }
@@ -540,20 +556,23 @@ export async function processUploadedFile(
 
   let permanentUrl: string;
   let formattedSize = formatFileSize(file.size);
-  let storageProvider = 'IT LABS Server Storage';
+  let storageProvider = 'Cloudinary Cloud Storage';
   let videoMeta: { duration?: number; durationFormatted?: string; resolution?: string; thumbnailUrl?: string } = {};
-
   let storedFileName = file.name;
+  let cloudinaryPublicId: string | undefined = undefined;
+  let cloudinaryResourceType: string | undefined = undefined;
+  let format: string | undefined = undefined;
 
   if (validation.category === 'image') {
-    // Perform genuine persistent upload
     const uploadResult = await uploadImageToPersistentStorage(file, onProgress);
     permanentUrl = uploadResult.permanentUrl;
     formattedSize = uploadResult.sizeFormatted;
     storageProvider = uploadResult.provider;
     storedFileName = permanentUrl.split('/').pop() || file.name;
+    cloudinaryPublicId = uploadResult.cloudinaryPublicId;
+    cloudinaryResourceType = uploadResult.cloudinaryResourceType;
+    format = uploadResult.format;
   } else if (validation.category === 'video') {
-    // 1. Extract video duration and dimensions
     if (onProgress) onProgress(15);
     try {
       videoMeta = await extractVideoMetadata(file);
@@ -561,17 +580,21 @@ export async function processUploadedFile(
       console.warn('Video metadata extraction warning:', mErr);
     }
 
-    // 2. Upload video payload to server persistent storage
     const serverResult = await uploadToAppServer(file, undefined, onProgress);
     permanentUrl = serverResult.permanentFileUrl;
     storageProvider = serverResult.storageProvider;
     storedFileName = serverResult.fileName || file.name;
+    cloudinaryPublicId = serverResult.cloudinaryPublicId;
+    cloudinaryResourceType = serverResult.cloudinaryResourceType;
+    format = serverResult.format;
   } else if (validation.category === 'pdf') {
-    // Upload PDF to server persistent storage
     const serverResult = await uploadToAppServer(file, undefined, onProgress);
     permanentUrl = serverResult.permanentFileUrl;
     storageProvider = serverResult.storageProvider;
     storedFileName = serverResult.fileName || file.name;
+    cloudinaryPublicId = serverResult.cloudinaryPublicId;
+    cloudinaryResourceType = serverResult.cloudinaryResourceType;
+    format = serverResult.format;
   } else {
     // Code file
     if (onProgress) onProgress(30);
@@ -579,6 +602,9 @@ export async function processUploadedFile(
     permanentUrl = serverResult.permanentFileUrl;
     storageProvider = serverResult.storageProvider;
     storedFileName = serverResult.fileName || file.name;
+    cloudinaryPublicId = serverResult.cloudinaryPublicId;
+    cloudinaryResourceType = serverResult.cloudinaryResourceType;
+    format = serverResult.format;
   }
 
   let codeContent: string | null = null;
@@ -604,7 +630,6 @@ export async function processUploadedFile(
     permanentFileUrl: permanentUrl,
     storageProvider,
     uploadedAt: new Date().toISOString(),
-    // Compatibility fields for existing views and modals
     id: fileId,
     resourceId: fileId,
     name: file.name,
@@ -615,6 +640,9 @@ export async function processUploadedFile(
     sizeFormatted: formattedSize,
     url: permanentUrl,
     downloadUrl: permanentUrl,
+    cloudinaryPublicId,
+    cloudinaryResourceType,
+    format,
     ...(videoMeta.duration ? { duration: videoMeta.duration } : {}),
     ...(videoMeta.durationFormatted ? { durationFormatted: videoMeta.durationFormatted } : {}),
     ...(videoMeta.resolution ? { resolution: videoMeta.resolution } : {}),
@@ -627,3 +655,4 @@ export async function processUploadedFile(
 
   return mediaAttachment;
 }
+

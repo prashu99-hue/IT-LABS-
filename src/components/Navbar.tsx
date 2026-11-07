@@ -29,6 +29,7 @@ interface NavbarProps {
   searchQuery?: string;
   onSearchChange?: (query: string) => void;
   onSearchSubmit?: (query: string) => void;
+  isAdminVerified?: boolean;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -43,6 +44,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   searchQuery = '',
   onSearchChange,
   onSearchSubmit,
+  isAdminVerified = false,
 }) => {
   const [showUserDropdown, setShowUserDropdown] = useState(false);
 
@@ -273,16 +275,18 @@ export const Navbar: React.FC<NavbarProps> = ({
                           <Bookmark className="w-4 h-4 text-slate-500" />
                           Saved Resources
                         </button>
-                        <button
-                          onClick={() => {
-                            onNavigate('admin');
-                            setShowUserDropdown(false);
-                          }}
-                          className="w-full px-3 py-2 text-left text-slate-700 hover:bg-slate-50 flex items-center gap-2"
-                        >
-                          <ShieldCheck className="w-4 h-4 text-slate-500" />
-                          Admin Moderation
-                        </button>
+                        {isAdminVerified && (
+                          <button
+                            onClick={() => {
+                              onNavigate('admin');
+                              setShowUserDropdown(false);
+                            }}
+                            className="w-full px-3 py-2 text-left text-blue-700 font-semibold hover:bg-blue-50 flex items-center gap-2"
+                          >
+                            <ShieldCheck className="w-4 h-4 text-blue-600" />
+                            Admin Moderation
+                          </button>
+                        )}
                       </div>
 
                       <div className="border-t border-slate-100 pt-1 mt-1">

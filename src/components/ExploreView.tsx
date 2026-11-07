@@ -33,12 +33,14 @@ interface ExploreViewProps {
   onFollowToggle: (userId: string) => void;
   onShare: (post: Post) => void;
   onAddComment: (postId: string, text: string) => void;
+  onDeleteComment?: (postId: string, commentId: string) => Promise<void> | void;
   onReportPost: (postId: string, reason: string) => void;
   onDeletePost?: (postId: string) => Promise<void> | void;
   onDeleteAttachment?: (postId: string, attachmentId: string) => Promise<void> | void;
   onSelectUser: (user: User) => void;
   onPreviewMedia?: (media: MediaAttachment) => void;
   onToast?: (message: string, type?: 'success' | 'info' | 'error') => void;
+  isAdminVerified?: boolean;
 }
 
 export const ExploreView: React.FC<ExploreViewProps> = ({
@@ -52,12 +54,14 @@ export const ExploreView: React.FC<ExploreViewProps> = ({
   onFollowToggle,
   onShare,
   onAddComment,
+  onDeleteComment,
   onReportPost,
   onDeletePost,
   onDeleteAttachment,
   onSelectUser,
   onPreviewMedia,
   onToast,
+  isAdminVerified,
 }) => {
   const [selectedRoadmapLevel, setSelectedRoadmapLevel] = useState<DifficultyLevel>('Beginner');
   const [filterDifficulty, setFilterDifficulty] = useState<'All' | DifficultyLevel>('All');
@@ -294,6 +298,7 @@ export const ExploreView: React.FC<ExploreViewProps> = ({
                 onFollowToggle={onFollowToggle}
                 onShare={onShare}
                 onAddComment={onAddComment}
+                onDeleteComment={onDeleteComment}
                 onReportPost={onReportPost}
                 onDeletePost={onDeletePost}
                 onDeleteAttachment={onDeleteAttachment}
@@ -301,6 +306,7 @@ export const ExploreView: React.FC<ExploreViewProps> = ({
                 onSelectCategory={onSelectCategory}
                 onPreviewMedia={onPreviewMedia}
                 onToast={onToast}
+                isAdminVerified={isAdminVerified}
               />
             ))
           )}

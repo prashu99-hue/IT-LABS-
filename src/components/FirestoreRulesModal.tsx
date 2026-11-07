@@ -42,10 +42,14 @@ service cloud.firestore {
                        isValidUserProfile(request.resource.data) &&
                        request.resource.data.id == request.auth.uid &&
                        (!('isAdmin' in request.resource.data) || request.resource.data.isAdmin == false);
-      allow update: if isOwner(userId) &&
+      // Update: Users can only update their own profile; cannot self-promote to admin or alter id
+      // OR: Administrators can update verification badges, academic roles, and moderation fields
+      allow update: if (isOwner(userId) &&
                        isValidUserProfile(request.resource.data) &&
                        request.resource.data.id == resource.data.id &&
-                       (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['isAdmin']) || isAdmin());
+                       (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['isAdmin']) || isAdmin())) ||
+                      (isAdmin() &&
+                       request.resource.data.diff(resource.data).affectedKeys().hasOnly(['isVerified', 'role', 'title', 'updatedAt']));
       allow delete: if isAdmin();
 
       match /following/{targetUserId} {
@@ -102,6 +106,17 @@ service cloud.firestore {
                          request.resource.data.content.size() > 0;
         allow update, delete: if isSignedIn() && (resource.data.authorId == request.auth.uid || isAdmin());
       }
+    }
+
+    match /reports/{reportId} {
+      allow create: if isSignedIn() &&
+                       request.resource.data.reporterId == request.auth.uid &&
+                       request.resource.data.postId is string &&
+                       request.resource.data.reason is string &&
+                       request.resource.data.reason.size() > 0 &&
+                       request.resource.data.reason.size() <= 1000;
+      allow read: if isAdmin();
+      allow update, delete: if isAdmin();
     }
   }
 }`;

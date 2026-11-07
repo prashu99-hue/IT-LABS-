@@ -19,6 +19,7 @@ import { RefreshCw, AlertCircle, Loader2 } from 'lucide-react';
 interface FeedViewProps {
   posts: Post[];
   currentUser: User;
+  isAdminVerified?: boolean;
   selectedSubject: SubjectCategory | 'All';
   onSelectSubject: (subject: SubjectCategory | 'All') => void;
   onLikeToggle: (postId: string) => void;
@@ -26,6 +27,7 @@ interface FeedViewProps {
   onFollowToggle: (userId: string) => void;
   onShare: (post: Post) => void;
   onAddComment: (postId: string, text: string) => void;
+  onDeleteComment?: (postId: string, commentId: string) => Promise<void> | void;
   onReportPost: (postId: string, reason: string) => void;
   onDeletePost?: (postId: string) => Promise<void> | void;
   onDeleteAttachment?: (postId: string, attachmentId: string) => Promise<void> | void;
@@ -44,6 +46,7 @@ interface FeedViewProps {
 export const FeedView: React.FC<FeedViewProps> = ({
   posts,
   currentUser,
+  isAdminVerified = false,
   selectedSubject,
   onSelectSubject,
   onLikeToggle,
@@ -51,6 +54,7 @@ export const FeedView: React.FC<FeedViewProps> = ({
   onFollowToggle,
   onShare,
   onAddComment,
+  onDeleteComment,
   onReportPost,
   onDeletePost,
   onDeleteAttachment,
@@ -280,11 +284,13 @@ export const FeedView: React.FC<FeedViewProps> = ({
               key={post.id}
               post={post}
               currentUser={currentUser}
+              isAdminVerified={isAdminVerified}
               onLikeToggle={onLikeToggle}
               onSaveToggle={onSaveToggle}
               onFollowToggle={onFollowToggle}
               onShare={onShare}
               onAddComment={onAddComment}
+              onDeleteComment={onDeleteComment}
               onReportPost={onReportPost}
               onDeletePost={onDeletePost}
               onDeleteAttachment={onDeleteAttachment}

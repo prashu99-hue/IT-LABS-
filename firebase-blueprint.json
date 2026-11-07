@@ -134,6 +134,12 @@
     "/posts/{postId}/comments/{commentId}": {
       "schema": "Comment",
       "description": "Subcollection of comments on an educational post"
+    },
+    "/admins/{adminId}": {
+      "description": "Collection of verified administrators"
+    },
+    "/reports/{reportId}": {
+      "description": "Collection of community content moderation reports"
     }
   }
 }

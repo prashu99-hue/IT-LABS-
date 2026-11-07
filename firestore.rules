@@ -43,10 +43,13 @@ service cloud.firestore {
                        (!('isAdmin' in request.resource.data) || request.resource.data.isAdmin == false);
 
       // Update: Users can only update their own profile; cannot self-promote to admin or alter id
-      allow update: if isOwner(userId) &&
+      // OR: Administrators can update verification badges, academic roles, and moderation fields
+      allow update: if (isOwner(userId) &&
                        isValidUserProfile(request.resource.data) &&
                        request.resource.data.id == resource.data.id &&
-                       (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['isAdmin']) || isAdmin());
+                       (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['isAdmin']) || isAdmin())) ||
+                      (isAdmin() &&
+                       request.resource.data.diff(resource.data).affectedKeys().hasOnly(['isVerified', 'role', 'title', 'updatedAt']));
 
       // Deletion: Admin only
       allow delete: if isAdmin();
@@ -129,6 +132,24 @@ service cloud.firestore {
         // Comment author or admin can edit/delete comment
         allow update, delete: if isSignedIn() && (resource.data.authorId == request.auth.uid || isAdmin());
       }
+    }
+
+    // 6. Content Moderation Reports Collection
+    // Path: /reports/{reportId}
+    match /reports/{reportId} {
+      // Authenticated users can submit a report against an educational post
+      allow create: if isSignedIn() &&
+                       request.resource.data.reporterId == request.auth.uid &&
+                       request.resource.data.postId is string &&
+                       request.resource.data.reason is string &&
+                       request.resource.data.reason.size() > 0 &&
+                       request.resource.data.reason.size() <= 1000;
+
+      // Only administrators can read the moderation reports queue
+      allow read: if isAdmin();
+
+      // Only administrators can update report status or resolve/delete reports
+      allow update, delete: if isAdmin();
     }
   }
 }

@@ -276,6 +276,7 @@ export function parsePostMedia(data: any): MediaAttachment | undefined {
     originalFileName: originalName,
     fileType: (category === 'pdf' ? 'pdf' : category) as any,
     fileSize: size,
+    sizeFormatted,
     permanentFileUrl: permanentUrl,
     storageProvider: m.storageProvider || data.storageProvider || 'IT LABS Server Storage',
     uploadedAt: m.uploadedAt || 'Recently',
@@ -287,7 +288,9 @@ export function parsePostMedia(data: any): MediaAttachment | undefined {
     mimeType: m.mimeType || data.mimeType || (category === 'pdf' ? 'application/pdf' : `application/${extension}`),
     category,
     size,
-    sizeFormatted,
+    cloudinaryPublicId: m.cloudinaryPublicId || data.cloudinaryPublicId,
+    cloudinaryResourceType: m.cloudinaryResourceType || data.cloudinaryResourceType,
+    format: m.format || data.format,
     url: permanentUrl,
     downloadUrl: m.downloadUrl || permanentUrl,
     thumbnailUrl: m.thumbnailUrl || data.thumbnailUrl,
@@ -318,7 +321,7 @@ export function parsePostAttachments(data: any): PostAttachment[] {
         mimeType: att.mimeType || (fileType === 'pdf' ? 'application/pdf' : `application/${extension || 'octet-stream'}`),
         fileSize: size,
         permanentFileUrl,
-        storageProvider: att.storageProvider || 'IT LABS Server Storage',
+        storageProvider: att.storageProvider || 'Cloudinary Cloud Storage',
         uploadedAt: att.uploadedAt || 'Recently',
         id,
         resourceId: id,
@@ -328,6 +331,9 @@ export function parsePostAttachments(data: any): PostAttachment[] {
         extension,
         size,
         sizeFormatted,
+        cloudinaryPublicId: att.cloudinaryPublicId,
+        cloudinaryResourceType: att.cloudinaryResourceType,
+        format: att.format,
         url: permanentFileUrl,
         downloadUrl: att.downloadUrl || permanentFileUrl,
         thumbnailUrl: att.thumbnailUrl,
@@ -450,8 +456,8 @@ export async function fetchPostsFromFirestore(currentUserId?: string): Promise<P
       attachments,
       likesCount: typeof data.likesCount === 'number' ? data.likesCount : 0,
       isLiked: likedPostIds.has(docSnap.id),
-      commentsCount: typeof data.commentsCount === 'number' ? data.commentsCount : comments.length,
-      savesCount: typeof data.savesCount === 'number' ? data.savesCount : 0,
+      commentsCount: typeof data.commentsCount === 'number' ? Math.max(0, data.commentsCount) : comments.length,
+      savesCount: typeof data.savesCount === 'number' ? Math.max(0, data.savesCount) : 0,
       isSaved: false,
       sharesCount: 0,
       createdAt: formatTimestamp(data.createdAt || data.createdAtIso),
@@ -679,6 +685,61 @@ export async function addCommentInFirestore(
 }
 
 /**
+ * Delete a comment from an educational post in Cloud Firestore (Author or Admin only).
+ * Uses an atomic writeBatch to remove the comment document and decrement the parent post's commentsCount.
+ */
+export async function deleteCommentInFirestore(
+  postId: string,
+  commentId: string
+): Promise<void> {
+  const currentAuthUser = auth.currentUser;
+  if (!currentAuthUser) {
+    throw new Error('Please sign in to manage comments.');
+  }
+
+  const commentDocRef = doc(db, 'posts', postId, 'comments', commentId);
+  const postDocRef = doc(db, 'posts', postId);
+
+  // 1. Verify comment existence
+  const commentSnap = await getDoc(commentDocRef);
+  if (!commentSnap.exists()) {
+    return; // Already deleted
+  }
+
+  // 2. Safely read parent post to prevent negative commentsCount
+  let currentCount = 0;
+  let postExists = false;
+  try {
+    const postSnap = await getDoc(postDocRef);
+    if (postSnap.exists()) {
+      postExists = true;
+      const countVal = postSnap.data()?.commentsCount;
+      currentCount = typeof countVal === 'number' ? countVal : 0;
+    }
+  } catch (pErr) {
+    console.warn('Could not read post before comment deletion:', pErr);
+  }
+
+  const newCount = Math.max(0, currentCount - 1);
+
+  // 3. Atomic writeBatch: delete comment and safely update post commentsCount
+  const batch = writeBatch(db);
+  batch.delete(commentDocRef);
+  if (postExists) {
+    batch.update(postDocRef, {
+      commentsCount: newCount,
+      updatedAt: serverTimestamp(),
+    });
+  }
+
+  try {
+    await batch.commit();
+  } catch (err: any) {
+    handleFirestoreError(err, OperationType.DELETE, `posts/${postId}/comments/${commentId}`);
+  }
+}
+
+/**
  * Delete a post from Cloud Firestore (Owner or Admin only)
  */
 export async function deletePostInFirestore(
@@ -711,23 +772,27 @@ export async function deletePostInFirestore(
     throw new Error('Permission denied: You can only delete your own educational posts.');
   }
 
-  // Requirement 6: Collect all associated stored files and delete from disk storage safely
+  // Collect all associated stored files and Cloudinary public IDs for safe cleanup
   const filesToDelete: string[] = [];
+  const publicIdsToDelete: string[] = [];
+
   if (Array.isArray(data.attachments)) {
     for (const att of data.attachments) {
+      if (att.cloudinaryPublicId) publicIdsToDelete.push(att.cloudinaryPublicId);
       if (att.fileName) filesToDelete.push(att.fileName);
       if (att.permanentFileUrl) filesToDelete.push(att.permanentFileUrl);
       if (att.url) filesToDelete.push(att.url);
     }
   }
+  if (data.media?.cloudinaryPublicId) publicIdsToDelete.push(data.media.cloudinaryPublicId);
   if (data.media?.fileName) filesToDelete.push(data.media.fileName);
   if (data.media?.permanentFileUrl) filesToDelete.push(data.media.permanentFileUrl);
   if (data.media?.url) filesToDelete.push(data.media.url);
   if (data.permanentFileUrl) filesToDelete.push(data.permanentFileUrl);
 
-  if (filesToDelete.length > 0) {
+  if (filesToDelete.length > 0 || publicIdsToDelete.length > 0) {
     try {
-      await deleteMediaFromServer(filesToDelete);
+      await deleteMediaFromServer(filesToDelete, publicIdsToDelete);
     } catch (storageErr) {
       console.warn('Non-blocking storage file deletion warning:', storageErr);
     }
@@ -804,12 +869,13 @@ export async function deleteSingleAttachmentFromPost(
         attachmentId: targetAttachment.attachmentId || targetAttachment.id || attachmentId,
         fileName,
         fileUrl: targetAttachment.permanentFileUrl || targetAttachment.url,
+        cloudinaryPublicId: targetAttachment.cloudinaryPublicId,
+        cloudinaryResourceType: targetAttachment.cloudinaryResourceType,
         userId: currentAuthUser.uid,
         userEmail: currentAuthUser.email || userEmail,
       });
     } catch (storageErr) {
       console.warn('Server attachment file deletion warning:', storageErr);
-      // Requirement 8: Handle storage failures safely, allowing Firestore state to stay consistent
     }
   }
 

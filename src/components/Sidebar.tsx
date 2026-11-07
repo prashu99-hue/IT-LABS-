@@ -26,6 +26,8 @@ interface SidebarProps {
   selectedSubject: SubjectCategory | 'All';
   onSelectSubject: (subj: SubjectCategory | 'All') => void;
   savedCount: number;
+  isAdminVerified?: boolean;
+  pendingReportsCount?: number;
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
@@ -35,6 +37,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
   selectedSubject,
   onSelectSubject,
   savedCount,
+  isAdminVerified = false,
+  pendingReportsCount = 0,
 }) => {
   const getSubjectIcon = (subj: SubjectCategory) => {
     switch (subj) {
@@ -159,20 +163,28 @@ export const Sidebar: React.FC<SidebarProps> = ({
               </div>
             </button>
 
-            <button
-              onClick={() => onNavigate('admin')}
-              className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl text-sm font-medium transition-all ${
-                currentView === 'admin'
-                  ? 'bg-blue-50 text-blue-700 font-semibold shadow-xs'
-                  : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
-              }`}
-            >
-              <div className="flex items-center gap-3">
-                <ShieldCheck className="w-4 h-4" />
-                <span>Admin Dashboard</span>
-              </div>
-              <span className="w-2 h-2 rounded-full bg-amber-500" title="3 pending reports" />
-            </button>
+            {isAdminVerified && (
+              <button
+                onClick={() => onNavigate('admin')}
+                className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl text-sm font-medium transition-all ${
+                  currentView === 'admin'
+                    ? 'bg-blue-50 text-blue-700 font-semibold shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
+                }`}
+              >
+                <div className="flex items-center gap-3">
+                  <ShieldCheck className="w-4 h-4 text-blue-600" />
+                  <span>Admin Dashboard</span>
+                </div>
+                {pendingReportsCount > 0 ? (
+                  <span className="text-[10px] font-bold px-1.5 py-0.2 rounded-full bg-amber-500 text-white">
+                    {pendingReportsCount}
+                  </span>
+                ) : (
+                  <span className="w-2 h-2 rounded-full bg-emerald-500" title="Security Console Active" />
+                )}
+              </button>
+            )}
           </nav>
         </div>
 

@@ -86,6 +86,9 @@ export interface PostAttachment {
   durationFormatted?: string;
   resolution?: string;
   resourceId?: string;
+  cloudinaryPublicId?: string;
+  cloudinaryResourceType?: string;
+  format?: string;
 }
 
 export type MediaAttachment = PostAttachment;

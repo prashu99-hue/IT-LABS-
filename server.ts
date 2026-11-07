@@ -3,9 +3,34 @@ import { createServer as createViteServer } from 'vite';
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
+import { v2 as cloudinary } from 'cloudinary';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+// Cloudinary Server-Side Configuration (Credentials never exposed to frontend)
+const CLOUDINARY_CLOUD_NAME = process.env.CLOUDINARY_CLOUD_NAME;
+const CLOUDINARY_API_KEY = process.env.CLOUDINARY_API_KEY;
+const CLOUDINARY_API_SECRET = process.env.CLOUDINARY_API_SECRET;
+
+const isCloudinaryConfigured = Boolean(
+  CLOUDINARY_CLOUD_NAME && CLOUDINARY_API_KEY && CLOUDINARY_API_SECRET
+);
+
+if (isCloudinaryConfigured) {
+  cloudinary.config({
+    cloud_name: CLOUDINARY_CLOUD_NAME,
+    api_key: CLOUDINARY_API_KEY,
+    api_secret: CLOUDINARY_API_SECRET,
+    secure: true,
+  });
+  console.log('[IT LABS Storage] Cloudinary persistent object storage initialized successfully.');
+} else {
+  console.warn(
+    '[IT LABS Storage] Cloudinary credentials not detected in server environment. Set CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, and CLOUDINARY_API_SECRET in .env.'
+  );
+}
+
 
 async function startServer() {
   const app = express();
@@ -31,7 +56,16 @@ async function startServer() {
     }
   }));
 
-  // Unified persistent media upload API route for Images, PDFs, Videos, and Code
+  // Storage status endpoint (reports whether Cloudinary is active without revealing secrets)
+  app.get('/api/storage-status', (req, res) => {
+    res.json({
+      configured: isCloudinaryConfigured,
+      provider: isCloudinaryConfigured ? 'Cloudinary Cloud Storage' : 'Not Configured',
+      cloudName: CLOUDINARY_CLOUD_NAME ? `${CLOUDINARY_CLOUD_NAME.substring(0, 3)}***` : null,
+    });
+  });
+
+  // Cloudinary Signed Upload Route for Images, Videos, PDFs, and Code
   const handleMediaUpload = async (req: express.Request, res: express.Response) => {
     try {
       const { fileData, fileName, mimeType, category } = req.body;
@@ -40,67 +74,60 @@ async function startServer() {
         return res.status(400).json({ success: false, error: 'No file data received' });
       }
 
-      // Extract base64 payload
-      const matches = fileData.match(/^data:([A-Za-z0-9\-+\/]+);base64,(.+)$/);
-      let buffer: Buffer;
-      let detectedMime = mimeType || 'application/octet-stream';
-      let extension = 'bin';
-
-      if (matches && matches.length === 3) {
-        detectedMime = matches[1];
-        buffer = Buffer.from(matches[2], 'base64');
-      } else {
-        buffer = Buffer.from(fileData, 'base64');
+      if (!isCloudinaryConfigured) {
+        return res.status(503).json({
+          success: false,
+          error: 'Cloudinary storage credentials are not configured on the server. Please add CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, and CLOUDINARY_API_SECRET to your .env file.',
+        });
       }
 
-      // Determine extension from filename or mime type
+      // Determine extension and resource_type
+      let extension = 'bin';
+      let detectedMime = mimeType || 'application/octet-stream';
+
       if (fileName && fileName.includes('.')) {
         const ext = fileName.split('.').pop()?.toLowerCase();
         if (ext) extension = ext === 'jpeg' ? 'jpg' : ext;
-      } else if (detectedMime) {
-        if (detectedMime.includes('pdf')) extension = 'pdf';
-        else if (detectedMime.includes('mp4')) extension = 'mp4';
-        else if (detectedMime.includes('webm')) extension = 'webm';
-        else if (detectedMime.includes('png')) extension = 'png';
-        else if (detectedMime.includes('webp')) extension = 'webp';
-        else if (detectedMime.includes('gif')) extension = 'gif';
-        else if (detectedMime.includes('jpeg') || detectedMime.includes('jpg')) extension = 'jpg';
       }
 
-      // Determine category prefix
-      let prefix = 'media';
-      if (extension === 'pdf' || detectedMime.includes('pdf')) prefix = 'pdf';
-      else if (['mp4', 'webm', 'mov'].includes(extension) || detectedMime.includes('video')) prefix = 'video';
-      else if (['jpg', 'png', 'webp', 'gif', 'svg'].includes(extension) || detectedMime.includes('image')) prefix = 'img';
-      else if (['py', 'java', 'c', 'cpp', 'js', 'ts', 'html', 'css', 'txt'].includes(extension)) prefix = 'code';
+      let resourceType: 'image' | 'video' | 'raw' = 'raw';
+      if (['jpg', 'jpeg', 'png', 'webp', 'gif', 'svg'].includes(extension) || detectedMime.includes('image')) {
+        resourceType = 'image';
+      } else if (['mp4', 'webm', 'mov'].includes(extension) || detectedMime.includes('video')) {
+        resourceType = 'video';
+      } else {
+        resourceType = 'raw';
+      }
 
-      // Generate a unique, permanent filename
-      const uniqueId = `${prefix}_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
-      const safeFileName = `${uniqueId}.${extension}`;
-      const filePath = path.join(uploadsDir, safeFileName);
-
-      await fs.promises.writeFile(filePath, buffer);
-
-      // Construct permanent URL
-      const permanentUrl = `/uploads/${safeFileName}`;
+      // Execute signed upload using official Cloudinary SDK
+      const uploadRes = await cloudinary.uploader.upload(fileData, {
+        resource_type: resourceType,
+        folder: 'it_labs_media',
+        use_filename: true,
+        unique_filename: true,
+        overwrite: false,
+      });
 
       return res.json({
         success: true,
-        url: permanentUrl,
-        permanentFileUrl: permanentUrl,
-        fileName: safeFileName,
-        originalName: fileName || safeFileName,
-        size: buffer.length,
+        url: uploadRes.secure_url,
+        permanentFileUrl: uploadRes.secure_url,
+        cloudinaryPublicId: uploadRes.public_id,
+        cloudinaryResourceType: uploadRes.resource_type,
+        format: uploadRes.format || extension,
+        fileName: fileName || `${uploadRes.public_id}.${uploadRes.format || extension}`,
+        originalName: fileName || `${uploadRes.public_id}.${uploadRes.format || extension}`,
+        size: uploadRes.bytes || 0,
         mimeType: detectedMime,
-        extension,
-        category: prefix === 'img' ? 'image' : prefix === 'video' ? 'video' : prefix === 'pdf' ? 'pdf' : 'code',
-        storageProvider: 'IT LABS Server Storage',
+        extension: uploadRes.format || extension,
+        category: resourceType === 'image' ? 'image' : resourceType === 'video' ? 'video' : extension === 'pdf' ? 'pdf' : 'code',
+        storageProvider: 'Cloudinary Cloud Storage',
       });
     } catch (err: any) {
-      console.error('Media upload handler error:', err);
+      console.error('Cloudinary media upload handler error:', err);
       return res.status(500).json({
         success: false,
-        error: err.message || 'Failed to save media file on server',
+        error: err.message || 'Failed to upload media to Cloudinary cloud storage',
       });
     }
   };
@@ -111,36 +138,47 @@ async function startServer() {
   // Media deletion API route for cleaning up stored attachments when post is deleted
   app.post('/api/delete-media', async (req, res) => {
     try {
-      const { fileNames, urls } = req.body;
-      const toDelete: string[] = [];
+      const { fileNames, urls, publicIds } = req.body;
+      const destroyedIds: string[] = [];
 
-      if (Array.isArray(fileNames)) {
-        for (const f of fileNames) {
-          if (typeof f === 'string') toDelete.push(path.basename(f));
-        }
-      }
-
-      if (Array.isArray(urls)) {
-        for (const u of urls) {
-          if (typeof u === 'string' && u.includes('/uploads/')) {
-            const base = u.split('/uploads/').pop();
-            if (base) toDelete.push(path.basename(base));
+      // 1. Destroy Cloudinary resources if publicIds are supplied
+      if (isCloudinaryConfigured && Array.isArray(publicIds)) {
+        for (const pid of publicIds) {
+          if (typeof pid === 'string') {
+            await cloudinary.uploader.destroy(pid).catch((cErr) => {
+              console.warn(`Cloudinary destroy error for ${pid}:`, cErr);
+            });
+            destroyedIds.push(pid);
           }
         }
       }
 
-      const results: string[] = [];
-      for (const fileName of toDelete) {
-        // Prevent path traversal
-        const safeName = path.basename(fileName);
-        const filePath = path.join(uploadsDir, safeName);
-        if (fs.existsSync(filePath)) {
-          await fs.promises.unlink(filePath).catch(() => {});
-          results.push(safeName);
+      // 2. Also check if urls contain Cloudinary publicIds or legacy local files
+      if (Array.isArray(urls)) {
+        for (const u of urls) {
+          if (typeof u === 'string') {
+            if (isCloudinaryConfigured && u.includes('res.cloudinary.com')) {
+              // Extract public_id from Cloudinary URL: .../it_labs_media/xyz.ext
+              const match = u.match(/\/it_labs_media\/([^\.\/]+)/);
+              if (match && match[1]) {
+                const pid = `it_labs_media/${match[1]}`;
+                await cloudinary.uploader.destroy(pid).catch(() => {});
+                destroyedIds.push(pid);
+              }
+            } else if (u.includes('/uploads/')) {
+              const base = u.split('/uploads/').pop();
+              if (base) {
+                const filePath = path.join(uploadsDir, path.basename(base));
+                if (fs.existsSync(filePath)) {
+                  await fs.promises.unlink(filePath).catch(() => {});
+                }
+              }
+            }
+          }
         }
       }
 
-      return res.json({ success: true, deleted: results });
+      return res.json({ success: true, deleted: destroyedIds });
     } catch (err: any) {
       console.error('Delete media handler error:', err);
       return res.status(500).json({ success: false, error: err.message || 'Failed to delete media' });
@@ -150,12 +188,12 @@ async function startServer() {
   // Individual attachment deletion API route with server-side ownership verification
   app.post('/api/delete-attachment', async (req, res) => {
     try {
-      const { postId, attachmentId, fileName, fileUrl, userId, userEmail } = req.body;
+      const { postId, attachmentId, fileName, fileUrl, cloudinaryPublicId, cloudinaryResourceType, userId, userEmail } = req.body;
 
-      if (!postId || (!attachmentId && !fileName && !fileUrl)) {
+      if (!postId || (!attachmentId && !fileName && !fileUrl && !cloudinaryPublicId)) {
         return res.status(400).json({
           success: false,
-          error: 'Missing required postId or attachment identifier (attachmentId, fileName, or fileUrl)',
+          error: 'Missing required postId or attachment identifier',
         });
       }
 
@@ -174,7 +212,6 @@ async function startServer() {
               isOwner = true;
             }
           } else if (fsRes.status === 404) {
-            // Local mock post or newly published cache
             if (userId) isOwner = true;
           }
         } catch (fsErr) {
@@ -190,7 +227,28 @@ async function startServer() {
         }
       }
 
-      // Identify single file to delete
+      // Delete from Cloudinary if publicId is provided or URL is from Cloudinary
+      let deletedFromCloudinary = false;
+      let targetPublicId = cloudinaryPublicId;
+
+      if (!targetPublicId && fileUrl && typeof fileUrl === 'string' && fileUrl.includes('res.cloudinary.com')) {
+        const match = fileUrl.match(/\/it_labs_media\/([^\.\/]+)/);
+        if (match && match[1]) {
+          targetPublicId = `it_labs_media/${match[1]}`;
+        }
+      }
+
+      if (isCloudinaryConfigured && targetPublicId) {
+        try {
+          const rType = (cloudinaryResourceType as any) || 'image';
+          await cloudinary.uploader.destroy(targetPublicId, { resource_type: rType });
+          deletedFromCloudinary = true;
+        } catch (cErr) {
+          console.warn(`Cloudinary destroy error for ${targetPublicId}:`, cErr);
+        }
+      }
+
+      // Also clean up local file if it was a legacy /uploads/ file
       let targetFile = '';
       if (fileName && typeof fileName === 'string') {
         targetFile = path.basename(fileName);
@@ -215,7 +273,8 @@ async function startServer() {
         success: true,
         postId,
         attachmentId,
-        fileName: targetFile,
+        cloudinaryPublicId: targetPublicId,
+        deletedFromCloudinary,
         deletedOnDisk,
         message: 'Attachment file removed successfully from storage',
       });

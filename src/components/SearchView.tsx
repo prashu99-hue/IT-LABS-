@@ -38,6 +38,7 @@ interface SearchViewProps {
   onFollowToggle: (userId: string) => void;
   onShare: (post: Post) => void;
   onAddComment: (postId: string, text: string) => void;
+  onDeleteComment?: (postId: string, commentId: string) => Promise<void> | void;
   onReportPost: (postId: string, reason: string) => void;
   onDeletePost?: (postId: string) => Promise<void> | void;
   onDeleteAttachment?: (postId: string, attachmentId: string) => Promise<void> | void;
@@ -45,6 +46,7 @@ interface SearchViewProps {
   onSelectCategory: (category: SubjectCategory) => void;
   onPreviewMedia?: (media: MediaAttachment) => void;
   onToast?: (message: string, type?: 'success' | 'info' | 'error') => void;
+  isAdminVerified?: boolean;
 }
 
 const RECENT_SEARCHES_KEY = 'itlabs_recent_searches';
@@ -62,6 +64,7 @@ export const SearchView: React.FC<SearchViewProps> = ({
   onFollowToggle,
   onShare,
   onAddComment,
+  onDeleteComment,
   onReportPost,
   onDeletePost,
   onDeleteAttachment,
@@ -69,6 +72,7 @@ export const SearchView: React.FC<SearchViewProps> = ({
   onSelectCategory,
   onPreviewMedia,
   onToast,
+  isAdminVerified,
 }) => {
   const [query, setQuery] = useState(initialQuery);
   const [activeTab, setActiveTab] = useState<'all' | 'posts' | 'attachments' | 'creators'>('all');
@@ -804,6 +808,7 @@ export const SearchView: React.FC<SearchViewProps> = ({
                     onFollowToggle={onFollowToggle}
                     onShare={onShare}
                     onAddComment={onAddComment}
+                    onDeleteComment={onDeleteComment}
                     onReportPost={onReportPost}
                     onDeletePost={onDeletePost}
                     onDeleteAttachment={onDeleteAttachment}
@@ -811,6 +816,7 @@ export const SearchView: React.FC<SearchViewProps> = ({
                     onSelectCategory={onSelectCategory}
                     onPreviewMedia={onPreviewMedia}
                     onToast={onToast}
+                    isAdminVerified={isAdminVerified}
                   />
                 ))}
 

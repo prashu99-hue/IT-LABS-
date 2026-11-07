@@ -34,15 +34,18 @@ import {
 import { Post, User, SubjectCategory, MediaAttachment } from '../types';
 import { downloadMediaResource } from '../utils/downloadHelper';
 import { deleteSingleAttachmentFromPost } from '../services/postService';
+import { auth } from '../firebase/config';
 
 interface PostCardProps {
   post: Post;
   currentUser: User;
+  isAdminVerified?: boolean;
   onLikeToggle: (postId: string) => void;
   onSaveToggle: (postId: string) => void;
   onFollowToggle: (userId: string) => void;
   onShare: (post: Post) => void;
   onAddComment: (postId: string, text: string) => void;
+  onDeleteComment?: (postId: string, commentId: string) => Promise<void> | void;
   onReportPost: (postId: string, reason: string) => void;
   onDeletePost?: (postId: string) => Promise<void> | void;
   onDeleteAttachment?: (postId: string, attachmentId: string) => Promise<void> | void;
@@ -55,11 +58,13 @@ interface PostCardProps {
 export const PostCard: React.FC<PostCardProps> = ({
   post,
   currentUser,
+  isAdminVerified = false,
   onLikeToggle,
   onSaveToggle,
   onFollowToggle,
   onShare,
   onAddComment,
+  onDeleteComment,
   onReportPost,
   onDeletePost,
   onDeleteAttachment,
@@ -78,7 +83,18 @@ export const PostCard: React.FC<PostCardProps> = ({
   const [downloadingMediaId, setDownloadingMediaId] = useState<string | null>(null);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [deletingCommentId, setDeletingCommentId] = useState<string | null>(null);
   const [failedMediaMap, setFailedMediaMap] = useState<Record<string, boolean>>({});
+
+  const handleDeleteComment = async (commentId: string) => {
+    if (!onDeleteComment) return;
+    setDeletingCommentId(commentId);
+    try {
+      await onDeleteComment(post.id, commentId);
+    } finally {
+      setDeletingCommentId(null);
+    }
+  };
 
   // Individual Attachment Deletion state (Requirement 1, 3, 7)
   const [attachmentToDelete, setAttachmentToDelete] = useState<MediaAttachment | null>(null);
@@ -174,8 +190,15 @@ export const PostCard: React.FC<PostCardProps> = ({
     setReportReason('');
   };
 
-  const isSelf = post.author.id === currentUser.id || post.authorId === currentUser.id;
-  const isAdmin = !!currentUser.isAdmin || currentUser.email === 'ecode2544@gmail.com';
+  const currentAuthUid = auth.currentUser?.uid;
+  const isSelf = Boolean(
+    (currentAuthUid && (post.author.id === currentAuthUid || post.authorId === currentAuthUid)) ||
+    (currentUser?.id && (post.author.id === currentUser.id || post.authorId === currentUser.id))
+  );
+  const isAdmin = Boolean(
+    isAdminVerified ||
+    (currentAuthUid && auth.currentUser?.email === 'ecode2544@gmail.com')
+  );
   const canDelete = isSelf || isAdmin;
 
   return (
@@ -551,23 +574,14 @@ export const PostCard: React.FC<PostCardProps> = ({
                       {/* Image Preview */}
                       {mediaItem.category === 'image' && (
                         hasFailed || (mediaItem.url.startsWith('blob:') && !mediaItem.url.includes('/uploads/')) ? (
-                          <div className="p-4 bg-amber-50/80 border border-amber-200 rounded-xl text-center space-y-1.5">
-                            <div className="flex items-center justify-center gap-1.5 text-amber-800 text-xs font-bold">
-                              <ImageIcon className="w-4 h-4 text-amber-600" />
-                              <span>Session Image Expired</span>
+                          <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl text-center space-y-1.5">
+                            <div className="flex items-center justify-center gap-1.5 text-slate-700 text-xs font-bold">
+                              <ImageIcon className="w-4 h-4 text-slate-500" />
+                              <span>Legacy Attachment Unavailable</span>
                             </div>
-                            <p className="text-[11px] text-amber-700 max-w-md mx-auto leading-relaxed">
-                              This image was saved before persistent cloud storage was enabled.
+                            <p className="text-[11px] text-slate-500 max-w-md mx-auto leading-relaxed">
+                              File metadata is preserved ({mediaItem.originalName} · {mediaItem.sizeFormatted}). This file was stored before Cloudinary persistent cloud storage was enabled.
                             </p>
-                            {canDelete && (
-                              <button
-                                type="button"
-                                onClick={() => setShowDeleteModal(true)}
-                                className="mt-1 px-3 py-1 bg-amber-100 hover:bg-amber-200 text-amber-900 rounded-lg text-[11px] font-semibold transition-colors"
-                              >
-                                Delete Expired Post
-                              </button>
-                            )}
                           </div>
                         ) : (
                           <div
@@ -857,40 +871,72 @@ export const PostCard: React.FC<PostCardProps> = ({
                 No comments yet. Be the first to spark the discussion!
               </p>
             ) : (
-              post.comments.map((comment) => (
-                <div
-                  key={comment.id}
-                  className={`p-3 rounded-xl border ${
-                    comment.isVerifiedEducatorAnswer
-                      ? 'bg-blue-50/60 border-blue-200 ring-1 ring-blue-100'
-                      : 'bg-white border-slate-200/80'
-                  }`}
-                >
-                  <div className="flex items-center justify-between gap-2 mb-1">
-                    <div className="flex items-center gap-2">
-                      <img
-                        src={comment.author.avatar}
-                        alt={comment.author.name}
-                        referrerPolicy="no-referrer"
-                        className="w-6 h-6 rounded-full object-cover"
-                      />
-                      <span className="text-xs font-semibold text-slate-900">
-                        {comment.author.name}
-                      </span>
-                      {comment.isVerifiedEducatorAnswer && (
-                        <span className="text-[10px] font-semibold text-blue-700 bg-blue-100 px-2 py-0.5 rounded-full flex items-center gap-1">
-                          <Sparkles className="w-2.5 h-2.5 text-blue-600" />
-                          Educator Answer
+              post.comments.map((comment) => {
+                const currentAuthUid = auth.currentUser?.uid;
+                const commentAuthorUid = comment.author?.id || (comment as any).authorId;
+                const isCommentAuthor = Boolean(currentAuthUid && commentAuthorUid && currentAuthUid === commentAuthorUid);
+                const isVerifiedAdmin = Boolean(
+                  isAdminVerified ||
+                  (currentAuthUid && auth.currentUser?.email === 'ecode2544@gmail.com')
+                );
+                const canDeleteComment = isCommentAuthor || isVerifiedAdmin;
+                const isDeletingThis = deletingCommentId === comment.id;
+
+                return (
+                  <div
+                    key={comment.id}
+                    className={`p-3 rounded-xl border ${
+                      comment.isVerifiedEducatorAnswer
+                        ? 'bg-blue-50/60 border-blue-200 ring-1 ring-blue-100'
+                        : 'bg-white border-slate-200/80'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-2 mb-1">
+                      <div className="flex items-center gap-2">
+                        <img
+                          src={comment.author.avatar}
+                          alt={comment.author.name}
+                          referrerPolicy="no-referrer"
+                          className="w-6 h-6 rounded-full object-cover"
+                        />
+                        <span className="text-xs font-semibold text-slate-900">
+                          {comment.author.name}
                         </span>
-                      )}
+                        {comment.isVerifiedEducatorAnswer && (
+                          <span className="text-[10px] font-semibold text-blue-700 bg-blue-100 px-2 py-0.5 rounded-full flex items-center gap-1">
+                            <Sparkles className="w-2.5 h-2.5 text-blue-600" />
+                            Educator Answer
+                          </span>
+                        )}
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        <span className="text-[11px] text-slate-400">{comment.createdAt}</span>
+
+                        {canDeleteComment && onDeleteComment && (
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteComment(comment.id)}
+                            disabled={isDeletingThis}
+                            className="p-1 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
+                            title={isCommentAuthor ? "Delete your comment" : "Delete comment (Admin Moderation)"}
+                            aria-label="Delete comment"
+                          >
+                            {isDeletingThis ? (
+                              <Loader2 className="w-3.5 h-3.5 animate-spin text-rose-500" />
+                            ) : (
+                              <Trash2 className="w-3.5 h-3.5" />
+                            )}
+                          </button>
+                        )}
+                      </div>
                     </div>
-                    <span className="text-[11px] text-slate-400">{comment.createdAt}</span>
+                    <p className="text-xs text-slate-700 ml-8 leading-relaxed">
+                      {comment.content}
+                    </p>
                   </div>
-                  <p className="text-xs text-slate-700 ml-8 leading-relaxed">
-                    {comment.content}
-                  </p>
-                </div>
-              ))
+                );
+              })
             )}
           </div>
         </div>

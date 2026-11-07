@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { ShieldAlert } from 'lucide-react';
 import {
   AppView,
   User,
@@ -11,8 +12,7 @@ import {
 import {
   INITIAL_USERS,
   CURRENT_USER,
-  INITIAL_POSTS,
-  INITIAL_REPORTS
+  INITIAL_POSTS
 } from './data/mockData';
 import { Navbar } from './components/Navbar';
 import { Sidebar } from './components/Sidebar';
@@ -44,13 +44,27 @@ import {
   fetchPostsFromFirestore,
   toggleLikeInFirestore,
   addCommentInFirestore,
+  deleteCommentInFirestore,
   deletePostInFirestore,
   deleteSingleAttachmentFromPost
 } from './services/postService';
+import {
+  verifyAdminStatus,
+  toggleUserVerificationInFirestore,
+  updateUserRoleInFirestore,
+  deleteUserInFirestore,
+  toggleFeaturedPostInFirestore,
+  submitPostReportToFirestore,
+  fetchReportsFromFirestore,
+  subscribeToReportsFromFirestore,
+  resolveReportInFirestore,
+  PRIMARY_ADMIN_EMAIL
+} from './services/adminService';
 
 export default function App() {
   const [currentView, setCurrentView] = useState<AppView>('landing');
   const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [isAdminVerified, setIsAdminVerified] = useState(false);
   const [users, setUsers] = useState<User[]>(INITIAL_USERS);
   const [currentUser, setCurrentUser] = useState<User>(CURRENT_USER);
   const [followedUserIds, setFollowedUserIds] = useState<Set<string>>(new Set());
@@ -59,7 +73,7 @@ export default function App() {
   const [isFeedLoading, setIsFeedLoading] = useState(false);
   const [feedError, setFeedError] = useState<string | null>(null);
   const [isPublishing, setIsPublishing] = useState(false);
-  const [reports, setReports] = useState<PostReport[]>(INITIAL_REPORTS);
+  const [reports, setReports] = useState<PostReport[]>([]);
   const [selectedSubject, setSelectedSubject] = useState<SubjectCategory | 'All'>('All');
   const [activeExploreCategory, setActiveExploreCategory] = useState<SubjectCategory | null>(null);
   const [viewedUser, setViewedUser] = useState<User>(CURRENT_USER);
@@ -95,11 +109,74 @@ export default function App() {
           }
           return [profile, ...prev];
         });
+      } else {
+        setIsLoggedIn(false);
+        setIsAdminVerified(false);
       }
     });
 
     return () => unsubscribe();
   }, []);
+
+  // Secure Admin Verification & Real-time Reports Sync Effect
+  useEffect(() => {
+    let isMounted = true;
+    let unsubscribeReports: (() => void) | null = null;
+
+    async function checkAdminCredentials() {
+      if (auth.currentUser) {
+        try {
+          const verified = await verifyAdminStatus(currentUser);
+          if (isMounted) {
+            setIsAdminVerified(verified);
+            if (verified) {
+              // Establish real-time listener for moderation reports in Cloud Firestore
+              unsubscribeReports = subscribeToReportsFromFirestore(
+                (liveReports) => {
+                  if (isMounted) {
+                    setReports(liveReports);
+                  }
+                },
+                (err) => {
+                  console.warn('Real-time reports sync error:', err);
+                  const isPermissionDenied =
+                    err?.code === 'permission-denied' ||
+                    (typeof err?.message === 'string' &&
+                      (err.message.includes('insufficient permissions') ||
+                       err.message.includes('permission-denied')));
+                  if (isPermissionDenied && isMounted) {
+                    setRulesErrorPath('reports');
+                    setRulesModalOpen(true);
+                  }
+                }
+              );
+            } else {
+              setReports([]);
+            }
+          }
+        } catch (err) {
+          console.warn('Admin verification check warning:', err);
+          if (isMounted) {
+            setIsAdminVerified(false);
+            setReports([]);
+          }
+        }
+      } else {
+        if (isMounted) {
+          setIsAdminVerified(false);
+          setReports([]);
+        }
+      }
+    }
+
+    checkAdminCredentials();
+    return () => {
+      isMounted = false;
+      if (unsubscribeReports) {
+        unsubscribeReports();
+      }
+    };
+  }, [isLoggedIn, currentUser.id, currentUser.email]);
 
   // Fetch all registered users from Cloud Firestore for Global Search & Creator Discovery
   useEffect(() => {
@@ -468,18 +545,75 @@ export default function App() {
     }
   };
 
-  // Report Post
-  const handleReportPost = (postId: string, reason: string) => {
-    const newReport: PostReport = {
-      id: 'rep-' + Date.now(),
-      postId,
-      reportedBy: currentUser.username,
-      reason,
-      timestamp: 'Just now',
-      status: 'pending',
-    };
-    setReports((prev) => [newReport, ...prev]);
-    showToast('Report submitted for admin review. Thank you for keeping IT LABS safe!', 'info');
+  // Delete Comment (Author or Admin only in Cloud Firestore)
+  const handleDeleteComment = async (postId: string, commentId: string) => {
+    if (!isLoggedIn || !auth.currentUser) {
+      showToast('Please sign in to manage comments.', 'info');
+      setCurrentView('auth');
+      return;
+    }
+
+    try {
+      await deleteCommentInFirestore(postId, commentId);
+
+      // Update UI only after Firestore confirms successful deletion
+      setPosts((prevPosts) =>
+        prevPosts.map((p) => {
+          if (p.id === postId) {
+            return {
+              ...p,
+              commentsCount: Math.max(0, p.commentsCount - 1),
+              comments: p.comments.filter((c) => c.id !== commentId),
+            };
+          }
+          return p;
+        })
+      );
+
+      showToast('Comment deleted successfully.', 'success');
+    } catch (err: any) {
+      console.error('Failed to delete comment:', err);
+      showToast(`Could not delete comment: ${err?.message || 'Permission denied'}`, 'error');
+    }
+  };
+
+  // Community Report Submission (Cloud Firestore)
+  const handleReportPost = async (postId: string, reason: string) => {
+    if (!isLoggedIn || !auth.currentUser) {
+      showToast('Please sign in or register to report content.', 'info');
+      setCurrentView('auth');
+      return;
+    }
+
+    const targetPost = posts.find((p) => p.id === postId);
+
+    try {
+      // Writes to /reports/{reportId} in Cloud Firestore
+      await submitPostReportToFirestore(
+        postId,
+        reason,
+        currentUser,
+        targetPost?.title
+      );
+      // Success toast ONLY shown after Firestore confirms setDoc succeeded
+      showToast('Report submitted for admin review. Thank you for keeping IT LABS safe!', 'info');
+    } catch (err: any) {
+      console.error('Failed to submit report to Firestore:', err);
+      const isPermissionDenied =
+        err?.code === 'permission-denied' ||
+        (typeof err?.message === 'string' &&
+          (err.message.includes('insufficient permissions') ||
+           err.message.includes('permission-denied') ||
+           err.message.includes('Missing or insufficient permissions')));
+
+      if (isPermissionDenied) {
+        setRulesErrorPath('reports');
+        setRulesModalOpen(true);
+        showToast('Firestore Permission Denied: /reports rules need to be published in Firebase Console.', 'error');
+      } else {
+        showToast(`Could not submit report: ${err?.message || 'Firestore write error'}`, 'error');
+      }
+    }
   };
 
   // Publish New Educational Post (Cloud Firestore)
@@ -616,37 +750,121 @@ export default function App() {
     setCurrentView('explore');
   };
 
-  // Admin actions
-  const handleToggleUserVerification = (userId: string) => {
+  // Admin actions: Educator Verification Badge (Firestore-backed)
+  const handleToggleUserVerification = async (userId: string) => {
+    if (!isAdminVerified) {
+      showToast('Admin privileges required to manage educator badges.', 'error');
+      return;
+    }
+
+    const targetUser = users.find((u) => u.id === userId);
+    if (!targetUser) return;
+
+    const currentStatus = !!targetUser.isVerified;
+    const nextStatus = !currentStatus;
+
+    // Optimistic UI update
     setUsers((prev) =>
-      prev.map((u) => {
-        if (u.id === userId) {
-          const next = !u.isVerified;
-          showToast(`Updated verification badge for ${u.name}`);
-          return { ...u, isVerified: next };
-        }
-        return u;
-      })
+      prev.map((u) => (u.id === userId ? { ...u, isVerified: nextStatus } : u))
     );
+
+    try {
+      await toggleUserVerificationInFirestore(userId, currentStatus);
+      showToast(`${nextStatus ? 'Granted' : 'Revoked'} verified educator badge for ${targetUser.name}`);
+    } catch (err: any) {
+      console.error('Failed to update verification status in Firestore:', err);
+      // Revert on error
+      setUsers((prev) =>
+        prev.map((u) => (u.id === userId ? { ...u, isVerified: currentStatus } : u))
+      );
+      showToast(`Could not update verification badge: ${err?.message || 'Permission denied'}`, 'error');
+    }
   };
 
-  const handleToggleFeaturedPost = (postId: string) => {
-    setPosts((prev) =>
-      prev.map((p) => {
-        if (p.id === postId) {
-          const next = !p.isFeatured;
-          showToast(next ? 'Post marked as Featured on Feed!' : 'Post removed from Featured');
-          return { ...p, isFeatured: next };
-        }
-        return p;
-      })
+  // Admin action: Update User Role & Academic Title (Firestore-backed)
+  const handleUpdateUserRole = async (userId: string, role: UserRole, title?: string) => {
+    if (!isAdminVerified) {
+      showToast('Admin privileges required to update user roles.', 'error');
+      return;
+    }
+
+    const targetUser = users.find((u) => u.id === userId);
+    if (!targetUser) return;
+
+    const prevRole = targetUser.role;
+    const prevTitle = targetUser.title;
+
+    setUsers((prev) =>
+      prev.map((u) => (u.id === userId ? { ...u, role, title: title || u.title } : u))
     );
+
+    try {
+      await updateUserRoleInFirestore(userId, role, title);
+      showToast(`Updated role to ${role === 'teacher_expert' ? 'Expert / Educator' : 'Student'} for ${targetUser.name}`);
+    } catch (err: any) {
+      console.error('Failed to update user role in Firestore:', err);
+      setUsers((prev) =>
+        prev.map((u) => (u.id === userId ? { ...u, role: prevRole, title: prevTitle } : u))
+      );
+      showToast(`Could not update user role: ${err?.message || 'Permission denied'}`, 'error');
+    }
+  };
+
+  // Admin action: Feature/Unfeature Post (Firestore-backed)
+  const handleToggleFeaturedPost = async (postId: string) => {
+    if (!isAdminVerified) {
+      showToast('Admin privileges required to feature posts.', 'error');
+      return;
+    }
+
+    const targetPost = posts.find((p) => p.id === postId);
+    if (!targetPost) return;
+
+    const currentStatus = !!targetPost.isFeatured;
+    const nextStatus = !currentStatus;
+
+    // Optimistic UI update
+    setPosts((prev) =>
+      prev.map((p) => (p.id === postId ? { ...p, isFeatured: nextStatus } : p))
+    );
+
+    try {
+      await toggleFeaturedPostInFirestore(postId, currentStatus);
+      showToast(nextStatus ? 'Post marked as Featured on Feed!' : 'Post removed from Featured');
+    } catch (err: any) {
+      console.error('Failed to update featured post in Firestore:', err);
+      // Revert on error
+      setPosts((prev) =>
+        prev.map((p) => (p.id === postId ? { ...p, isFeatured: currentStatus } : p))
+      );
+      showToast(`Could not feature post: ${err?.message || 'Permission denied'}`, 'error');
+    }
+  };
+
+  // Admin action: Delete User Account (Firestore-backed)
+  const handleDeleteUser = async (userId: string) => {
+    if (!isAdminVerified) {
+      showToast('Admin privileges required to remove accounts.', 'error');
+      return;
+    }
+
+    const targetUser = users.find((u) => u.id === userId);
+    if (!targetUser) return;
+
+    try {
+      await deleteUserInFirestore(userId);
+      setUsers((prev) => prev.filter((u) => u.id !== userId));
+      showToast(`User account ${targetUser.name} removed from platform`);
+    } catch (err: any) {
+      console.error('Failed to delete user in Firestore:', err);
+      showToast(`Could not delete user: ${err?.message || 'Permission denied'}`, 'error');
+    }
   };
 
   const handleDeletePost = async (postId: string) => {
     const postToDelete = posts.find((p) => p.id === postId);
     const isPostAuthor = postToDelete && (postToDelete.authorId === currentUser.id || postToDelete.author.id === currentUser.id);
-    const isAdminUser = !!currentUser.isAdmin || currentUser.email === 'ecode2544@gmail.com';
+    const isAdminUser = isAdminVerified || currentUser.email === PRIMARY_ADMIN_EMAIL;
 
     if (!isPostAuthor && !isAdminUser) {
       showToast('Permission denied: You can only delete your own educational posts.', 'error');
@@ -657,7 +875,7 @@ export default function App() {
       await deletePostInFirestore(postId, currentUser.id, isAdminUser);
       setPosts((prev) => prev.filter((p) => p.id !== postId));
       setReports((prev) => prev.filter((r) => r.postId !== postId));
-      showToast('Educational post deleted successfully', 'success');
+      showToast('Educational post and associated files purged successfully', 'success');
     } catch (err: any) {
       console.error('Failed to delete post:', err);
       const isPermissionDenied =
@@ -682,7 +900,7 @@ export default function App() {
   const handleDeleteAttachment = async (postId: string, attachmentId: string) => {
     const postObj = posts.find((p) => p.id === postId);
     const isPostAuthor = postObj && (postObj.authorId === currentUser.id || postObj.author.id === currentUser.id);
-    const isAdminUser = !!currentUser.isAdmin || currentUser.email === 'ecode2544@gmail.com';
+    const isAdminUser = isAdminVerified || currentUser.email === PRIMARY_ADMIN_EMAIL;
 
     if (!isPostAuthor && !isAdminUser) {
       showToast('Permission denied: You can only delete attachments from your own educational posts.', 'error');
@@ -720,20 +938,61 @@ export default function App() {
     }
   };
 
-  const handleResolveReport = (reportId: string, action: 'dismiss' | 'delete') => {
+  // Admin action: Resolve moderation report (Cloud Firestore)
+  const handleResolveReport = async (reportId: string, action: 'dismiss' | 'delete') => {
+    if (!isAdminVerified) {
+      showToast('Admin privileges required to resolve moderation reports.', 'error');
+      return;
+    }
+
     const targetReport = reports.find((r) => r.id === reportId);
     if (!targetReport) return;
 
-    if (action === 'delete') {
-      handleDeletePost(targetReport.postId);
-      showToast('Flagged post removed and report resolved');
-    } else {
-      showToast('Report dismissed');
+    // Handle legacy in-memory mock reports cleanly if any exist
+    if (reportId.startsWith('rep-') && !reportId.includes('_')) {
+      setReports((prev) => prev.filter((r) => r.id !== reportId));
+      if (action === 'delete') {
+        setPosts((prev) => prev.filter((p) => p.id !== targetReport.postId));
+      }
+      showToast(`Mock report ${action === 'dismiss' ? 'dismissed' : 'resolved'}`);
+      return;
     }
 
-    setReports((prev) =>
-      prev.map((r) => (r.id === reportId ? { ...r, status: 'reviewed' as const } : r))
-    );
+    try {
+      // Confirmed only after Firestore resolves successfully
+      await resolveReportInFirestore(reportId, action, targetReport.postId);
+
+      if (action === 'delete') {
+        setPosts((prev) => prev.filter((p) => p.id !== targetReport.postId));
+        showToast('Flagged post removed and report marked as reviewed in Firestore', 'success');
+      } else {
+        showToast('Report dismissed successfully in Firestore', 'success');
+      }
+
+      setReports((prev) =>
+        prev.map((r) =>
+          r.id === reportId
+            ? { ...r, status: action === 'dismiss' ? ('dismissed' as const) : ('reviewed' as const) }
+            : r
+        )
+      );
+    } catch (err: any) {
+      console.error('Failed to resolve report in Firestore:', err);
+      const isPermissionDenied =
+        err?.code === 'permission-denied' ||
+        (typeof err?.message === 'string' &&
+          (err.message.includes('insufficient permissions') ||
+           err.message.includes('permission-denied') ||
+           err.message.includes('Missing or insufficient permissions')));
+
+      if (isPermissionDenied) {
+        setRulesErrorPath(`reports/${reportId}`);
+        setRulesModalOpen(true);
+        showToast('Firestore Permission Denied: Admin rules for /reports must be published in Firebase Console.', 'error');
+      } else {
+        showToast(`Could not resolve report: ${err?.message || 'Error'}`, 'error');
+      }
+    }
   };
 
   const savedPostsCount = posts.filter((p) => p.isSaved).length;
@@ -787,6 +1046,7 @@ export default function App() {
           setCurrentView('search');
         }}
         isLoggedIn={isLoggedIn}
+        isAdminVerified={isAdminVerified}
         onToggleAuth={() => {
           if (isLoggedIn) {
             handleLogout();
@@ -837,6 +1097,8 @@ export default function App() {
                 if (currentView !== 'feed') setCurrentView('feed');
               }}
               savedCount={savedPostsCount}
+              isAdminVerified={isAdminVerified}
+              pendingReportsCount={reports.filter((r) => r.status === 'pending').length}
             />
 
             {/* Central Main Stage */}
@@ -852,6 +1114,7 @@ export default function App() {
                   onFollowToggle={handleFollowToggle}
                   onShare={(p) => setShareModalPost(p)}
                   onAddComment={handleAddComment}
+                  onDeleteComment={handleDeleteComment}
                   onReportPost={handleReportPost}
                   onDeletePost={handleDeletePost}
                   onDeleteAttachment={handleDeleteAttachment}
@@ -880,12 +1143,14 @@ export default function App() {
                   onFollowToggle={handleFollowToggle}
                   onShare={(p) => setShareModalPost(p)}
                   onAddComment={handleAddComment}
+                  onDeleteComment={handleDeleteComment}
                   onReportPost={handleReportPost}
                   onDeletePost={handleDeletePost}
                   onDeleteAttachment={handleDeleteAttachment}
                   onSelectUser={handleSelectUser}
                   onPreviewMedia={(m) => setPreviewMedia(m)}
                   onToast={showToast}
+                  isAdminVerified={isAdminVerified}
                 />
               )}
 
@@ -914,6 +1179,7 @@ export default function App() {
                   onSaveToggle={handleSaveToggle}
                   onShare={(p) => setShareModalPost(p)}
                   onAddComment={handleAddComment}
+                  onDeleteComment={handleDeleteComment}
                   onReportPost={handleReportPost}
                   onDeletePost={handleDeletePost}
                   onDeleteAttachment={handleDeleteAttachment}
@@ -922,6 +1188,7 @@ export default function App() {
                   onBackToFeed={() => setCurrentView('feed')}
                   onPreviewMedia={(m) => setPreviewMedia(m)}
                   onToast={showToast}
+                  isAdminVerified={isAdminVerified}
                 />
               )}
 
@@ -951,6 +1218,7 @@ export default function App() {
                   onFollowToggle={handleFollowToggle}
                   onShare={(p) => setShareModalPost(p)}
                   onAddComment={handleAddComment}
+                  onDeleteComment={handleDeleteComment}
                   onReportPost={handleReportPost}
                   onDeletePost={handleDeletePost}
                   onDeleteAttachment={handleDeleteAttachment}
@@ -958,6 +1226,7 @@ export default function App() {
                   onSelectCategory={handleSelectCategory}
                   onPreviewMedia={(m) => setPreviewMedia(m)}
                   onToast={showToast}
+                  isAdminVerified={isAdminVerified}
                 />
               )}
 
@@ -970,6 +1239,7 @@ export default function App() {
                   onFollowToggle={handleFollowToggle}
                   onShare={(p) => setShareModalPost(p)}
                   onAddComment={handleAddComment}
+                  onDeleteComment={handleDeleteComment}
                   onReportPost={handleReportPost}
                   onDeletePost={handleDeletePost}
                   onDeleteAttachment={handleDeleteAttachment}
@@ -981,20 +1251,51 @@ export default function App() {
                   }}
                   onPreviewMedia={(m) => setPreviewMedia(m)}
                   onToast={showToast}
+                  isAdminVerified={isAdminVerified}
                 />
               )}
 
               {currentView === 'admin' && (
-                <AdminDashboardView
-                  users={users}
-                  posts={posts}
-                  reports={reports}
-                  onToggleUserVerification={handleToggleUserVerification}
-                  onToggleFeaturedPost={handleToggleFeaturedPost}
-                  onDeletePost={handleDeletePost}
-                  onResolveReport={handleResolveReport}
-                  onSelectUser={handleSelectUser}
-                />
+                !isAdminVerified ? (
+                  <div className="bg-white rounded-2xl border border-rose-200 p-8 text-center shadow-sm">
+                    <div className="w-16 h-16 bg-rose-50 text-rose-600 rounded-full flex items-center justify-center mx-auto mb-4 border border-rose-100">
+                      <ShieldAlert className="w-8 h-8" />
+                    </div>
+                    <h2 className="text-xl font-bold text-slate-900 mb-2">Admin Access Restricted</h2>
+                    <p className="text-sm text-slate-600 max-w-md mx-auto mb-6">
+                      The IT LABS Admin Dashboard is strictly restricted to verified system administrators and appointed moderators.
+                      You are currently active as <span className="font-semibold text-slate-800">{currentUser.name}</span> ({currentUser.email || 'Guest / Unverified User'}).
+                    </p>
+                    <div className="bg-slate-50 border border-slate-200 rounded-xl p-3.5 max-w-md mx-auto mb-6 text-xs text-slate-600 text-left space-y-1">
+                      <p className="font-semibold text-slate-700">Security Verification Protocol:</p>
+                      <p>• Super Admin Account: <code className="text-indigo-600 font-mono">ecode2544@gmail.com</code></p>
+                      <p>• Role Delegations: Verified via Cloud Firestore <code className="text-slate-700 font-mono">/admins/{'{uid}'}</code></p>
+                      <p>• Client-side role spoofing is strictly rejected by Firestore security rules.</p>
+                    </div>
+                    <button
+                      onClick={() => setCurrentView('feed')}
+                      className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-sm font-semibold transition-colors shadow-sm"
+                    >
+                      Return to Home Feed
+                    </button>
+                  </div>
+                ) : (
+                  <AdminDashboardView
+                    users={users}
+                    posts={posts}
+                    reports={reports}
+                    currentAdmin={currentUser}
+                    onToggleUserVerification={handleToggleUserVerification}
+                    onUpdateUserRole={handleUpdateUserRole}
+                    onDeleteUser={handleDeleteUser}
+                    onToggleFeaturedPost={handleToggleFeaturedPost}
+                    onDeletePost={handleDeletePost}
+                    onResolveReport={handleResolveReport}
+                    onSelectUser={handleSelectUser}
+                    onPreviewPost={(post) => setPreviewMedia(post.media || post.attachments?.[0] || null)}
+                    onToast={showToast}
+                  />
+                )
               )}
             </main>
 

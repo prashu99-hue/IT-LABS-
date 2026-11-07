@@ -32,6 +32,7 @@ interface ProfileViewProps {
   onSaveToggle: (postId: string) => void;
   onShare: (post: Post) => void;
   onAddComment: (postId: string, text: string) => void;
+  onDeleteComment?: (postId: string, commentId: string) => Promise<void> | void;
   onReportPost: (postId: string, reason: string) => void;
   onDeletePost?: (postId: string) => Promise<void> | void;
   onDeleteAttachment?: (postId: string, attachmentId: string) => Promise<void> | void;
@@ -40,6 +41,7 @@ interface ProfileViewProps {
   onBackToFeed: () => void;
   onPreviewMedia?: (media: MediaAttachment) => void;
   onToast?: (message: string, type?: 'success' | 'info' | 'error') => void;
+  isAdminVerified?: boolean;
 }
 
 export const ProfileView: React.FC<ProfileViewProps> = ({
@@ -53,6 +55,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
   onSaveToggle,
   onShare,
   onAddComment,
+  onDeleteComment,
   onReportPost,
   onDeletePost,
   onDeleteAttachment,
@@ -61,6 +64,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
   onBackToFeed,
   onPreviewMedia,
   onToast,
+  isAdminVerified,
 }) => {
   const [profileTab, setProfileTab] = useState<'posts' | 'resources' | 'followers' | 'following' | 'saved'>('posts');
   const [followersList, setFollowersList] = useState<User[]>([]);
@@ -359,6 +363,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                 onFollowToggle={onFollowToggle}
                 onShare={onShare}
                 onAddComment={onAddComment}
+                onDeleteComment={onDeleteComment}
                 onReportPost={onReportPost}
                 onDeletePost={onDeletePost}
                 onDeleteAttachment={onDeleteAttachment}
@@ -366,6 +371,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                 onSelectCategory={onSelectCategory}
                 onPreviewMedia={onPreviewMedia}
                 onToast={onToast}
+                isAdminVerified={isAdminVerified}
               />
             ))
           )
@@ -388,6 +394,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                 onFollowToggle={onFollowToggle}
                 onShare={onShare}
                 onAddComment={onAddComment}
+                onDeleteComment={onDeleteComment}
                 onReportPost={onReportPost}
                 onDeletePost={onDeletePost}
                 onDeleteAttachment={onDeleteAttachment}
@@ -395,6 +402,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                 onSelectCategory={onSelectCategory}
                 onPreviewMedia={onPreviewMedia}
                 onToast={onToast}
+                isAdminVerified={isAdminVerified}
               />
             ))
           )
@@ -584,6 +592,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                 onSelectCategory={onSelectCategory}
                 onPreviewMedia={onPreviewMedia}
                 onToast={onToast}
+                isAdminVerified={isAdminVerified}
               />
             ))
           )
