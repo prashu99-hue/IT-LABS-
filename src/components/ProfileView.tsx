@@ -15,7 +15,10 @@ import {
   Bookmark,
   Users,
   ChevronRight,
-  Loader2
+  Loader2,
+  Edit3,
+  X,
+  Save
 } from 'lucide-react';
 import { User, Post, SubjectCategory, MediaAttachment } from '../types';
 import { PostCard } from './PostCard';
@@ -42,6 +45,7 @@ interface ProfileViewProps {
   onPreviewMedia?: (media: MediaAttachment) => void;
   onToast?: (message: string, type?: 'success' | 'info' | 'error') => void;
   isAdminVerified?: boolean;
+  onUpdateProfile?: (updates: Partial<User>) => Promise<void> | void;
 }
 
 export const ProfileView: React.FC<ProfileViewProps> = ({
@@ -65,13 +69,72 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
   onPreviewMedia,
   onToast,
   isAdminVerified,
+  onUpdateProfile,
 }) => {
   const [profileTab, setProfileTab] = useState<'posts' | 'resources' | 'followers' | 'following' | 'saved'>('posts');
   const [followersList, setFollowersList] = useState<User[]>([]);
   const [followingList, setFollowingList] = useState<User[]>([]);
   const [isLoadingLists, setIsLoadingLists] = useState(false);
 
+  // Edit Profile modal state
+  const [isEditingProfile, setIsEditingProfile] = useState(false);
+  const [editName, setEditName] = useState(user.name);
+  const [editTitle, setEditTitle] = useState(user.title || '');
+  const [editInstitution, setEditInstitution] = useState(user.institution || '');
+  const [editBio, setEditBio] = useState(user.bio || '');
+  const [editExpertise, setEditExpertise] = useState<string[]>(user.expertise || []);
+  const [expertiseInput, setExpertiseInput] = useState('');
+  const [isSavingProfile, setIsSavingProfile] = useState(false);
+
   const isSelf = user.id === currentUser.id;
+
+  const handleOpenEdit = () => {
+    setEditName(user.name);
+    setEditTitle(user.title || '');
+    setEditInstitution(user.institution || '');
+    setEditBio(user.bio || '');
+    setEditExpertise(user.expertise || []);
+    setExpertiseInput('');
+    setIsEditingProfile(true);
+  };
+
+  const handleAddExpertise = () => {
+    const trimmed = expertiseInput.trim();
+    if (trimmed && !editExpertise.includes(trimmed)) {
+      setEditExpertise([...editExpertise, trimmed]);
+      setExpertiseInput('');
+    }
+  };
+
+  const handleRemoveExpertise = (tag: string) => {
+    setEditExpertise(editExpertise.filter((t) => t !== tag));
+  };
+
+  const handleSaveProfile = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editName.trim()) {
+      onToast?.('Name cannot be empty.', 'error');
+      return;
+    }
+    setIsSavingProfile(true);
+    try {
+      if (onUpdateProfile) {
+        await onUpdateProfile({
+          name: editName.trim(),
+          title: editTitle.trim(),
+          institution: editInstitution.trim(),
+          bio: editBio.trim(),
+          expertise: editExpertise,
+        });
+      }
+      setIsEditingProfile(false);
+    } catch (err: any) {
+      onToast?.(`Failed to update profile: ${err?.message || 'Error'}`, 'error');
+    } finally {
+      setIsSavingProfile(false);
+    }
+  };
+
   const isFollowingUser = followedUserIds.has(user.id) || !!user.isFollowing;
   const userPosts = allPosts.filter((p) => p.author.id === user.id || p.authorId === user.id);
   const resourcePosts = userPosts.filter((p) => !!p.resourceUrl || (p.attachments && p.attachments.length > 0));
@@ -177,8 +240,20 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                   )}
                 </button>
               ) : (
-                <div className="px-3.5 py-1.5 bg-blue-50 text-blue-700 rounded-xl text-xs font-semibold border border-blue-100">
-                  Your Active Persona
+                <div className="flex items-center gap-2">
+                  <div className="px-3.5 py-1.5 bg-blue-50 text-blue-700 rounded-xl text-xs font-semibold border border-blue-100">
+                    Your Active Persona
+                  </div>
+                  {onUpdateProfile && (
+                    <button
+                      type="button"
+                      onClick={handleOpenEdit}
+                      className="flex items-center gap-1.5 px-3.5 py-1.5 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-semibold shadow-xs transition-all cursor-pointer"
+                    >
+                      <Edit3 className="w-3.5 h-3.5" />
+                      <span>Edit Profile</span>
+                    </button>
+                  )}
                 </div>
               )}
             </div>
@@ -598,6 +673,175 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
           )
         )}
       </div>
+
+      {/* Edit Profile Modal */}
+      {isEditingProfile && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-white rounded-3xl border border-slate-200 shadow-2xl max-w-lg w-full overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+            {/* Modal Header */}
+            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center">
+                  <Edit3 className="w-4 h-4" />
+                </div>
+                <h3 className="text-base font-bold text-slate-900">Edit Scholar Profile</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsEditingProfile(false)}
+                className="p-1.5 text-slate-400 hover:text-slate-600 rounded-xl hover:bg-slate-100 transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Modal Form */}
+            <form onSubmit={handleSaveProfile} className="p-6 space-y-4">
+              {/* Full Name */}
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                  Full Name <span className="text-rose-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  value={editName}
+                  onChange={(e) => setEditName(e.target.value)}
+                  maxLength={120}
+                  required
+                  placeholder="e.g. Alex Vance"
+                  className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs sm:text-sm font-medium text-slate-900 focus:outline-hidden focus:bg-white focus:border-blue-500"
+                />
+              </div>
+
+              {/* Title */}
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                  Academic / Professional Title
+                </label>
+                <input
+                  type="text"
+                  value={editTitle}
+                  onChange={(e) => setEditTitle(e.target.value)}
+                  maxLength={150}
+                  placeholder="e.g. Lead Instructor / CS Student Researcher"
+                  className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs sm:text-sm font-medium text-slate-900 focus:outline-hidden focus:bg-white focus:border-blue-500"
+                />
+              </div>
+
+              {/* Institution */}
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                  University / Academic Institution
+                </label>
+                <input
+                  type="text"
+                  value={editInstitution}
+                  onChange={(e) => setEditInstitution(e.target.value)}
+                  maxLength={200}
+                  placeholder="e.g. MIT / Stanford / Tech Academy"
+                  className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs sm:text-sm font-medium text-slate-900 focus:outline-hidden focus:bg-white focus:border-blue-500"
+                />
+              </div>
+
+              {/* Bio */}
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                  Scholar Bio
+                </label>
+                <textarea
+                  value={editBio}
+                  onChange={(e) => setEditBio(e.target.value)}
+                  maxLength={2000}
+                  rows={3}
+                  placeholder="Tell peers and students about your academic interests, research, and learning goals..."
+                  className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs sm:text-sm font-medium text-slate-900 focus:outline-hidden focus:bg-white focus:border-blue-500 resize-none"
+                />
+                <div className="text-[10px] text-slate-400 text-right mt-0.5">
+                  {editBio.length} / 2000 characters
+                </div>
+              </div>
+
+              {/* Expertise Tags */}
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                  Areas of Expertise / Subjects
+                </label>
+                <div className="flex gap-2 mb-2">
+                  <input
+                    type="text"
+                    value={expertiseInput}
+                    onChange={(e) => setExpertiseInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleAddExpertise();
+                      }
+                    }}
+                    placeholder="Add subject (e.g. Java, Python, AI/ML)..."
+                    className="flex-1 px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium text-slate-900 focus:outline-hidden focus:bg-white focus:border-blue-500"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleAddExpertise}
+                    className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-semibold transition-colors"
+                  >
+                    Add
+                  </button>
+                </div>
+
+                {editExpertise.length > 0 && (
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    {editExpertise.map((tag) => (
+                      <span
+                        key={tag}
+                        className="inline-flex items-center gap-1 text-[11px] font-semibold px-2.5 py-1 rounded-lg bg-blue-50 text-blue-700 border border-blue-100"
+                      >
+                        <span>{tag}</span>
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveExpertise(tag)}
+                          className="hover:text-rose-600 ml-0.5"
+                        >
+                          ×
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Actions */}
+              <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setIsEditingProfile(false)}
+                  disabled={isSavingProfile}
+                  className="px-4 py-2 border border-slate-200 hover:bg-slate-50 text-slate-700 rounded-xl text-xs font-semibold transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSavingProfile}
+                  className="flex items-center gap-1.5 px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-semibold shadow-xs transition-all disabled:opacity-50 cursor-pointer"
+                >
+                  {isSavingProfile ? (
+                    <>
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      <span>Saving...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Save className="w-3.5 h-3.5" />
+                      <span>Save Changes</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
     </div>
   );

@@ -32,7 +32,7 @@ import { ShareModal } from './components/ShareModal';
 import { MediaPreviewModal } from './components/MediaPreviewModal';
 import { FirestoreRulesModal } from './components/FirestoreRulesModal';
 import { Toast, ToastMessage } from './components/Toast';
-import { subscribeToFirebaseAuthState, logoutFirebase, fetchAllUsersFromFirestore } from './services/authService';
+import { subscribeToFirebaseAuthState, logoutFirebase, fetchAllUsersFromFirestore, updateUserProfileInFirestore } from './services/authService';
 import {
   followCreatorInFirestore,
   unfollowCreatorInFirestore,
@@ -239,24 +239,62 @@ export default function App() {
     loadFollowedCreators();
   }, [isLoggedIn, currentUser.id]);
 
+  // Helper to read and persist user-specific bookmarks
+  const getUserSavedIds = useCallback((userId: string): Set<string> => {
+    try {
+      const raw = localStorage.getItem(`it_labs_saved_${userId}`);
+      if (raw) return new Set(JSON.parse(raw));
+    } catch {
+      // ignore
+    }
+    return new Set();
+  }, []);
+
+  const persistUserSavedIds = useCallback((userId: string, ids: Set<string>) => {
+    try {
+      localStorage.setItem(`it_labs_saved_${userId}`, JSON.stringify(Array.from(ids)));
+    } catch {
+      // ignore
+    }
+  }, []);
+
   // Fetch actual educational posts from Cloud Firestore
   const loadFeedPosts = useCallback(async () => {
     setIsFeedLoading(true);
     setFeedError(null);
     try {
+      const activeUid = isLoggedIn && auth.currentUser ? auth.currentUser.uid : currentUser.id;
+      const savedIds = getUserSavedIds(activeUid);
       const firestorePosts = await fetchPostsFromFirestore(isLoggedIn ? currentUser.id : undefined);
-      setPosts(firestorePosts);
+      setPosts(
+        firestorePosts.map((p) => ({
+          ...p,
+          isSaved: savedIds.has(p.id),
+        }))
+      );
     } catch (err: any) {
       console.warn('Firestore feed load warning:', err);
       setFeedError(err?.message || 'Could not load posts from Cloud Firestore.');
     } finally {
       setIsFeedLoading(false);
     }
-  }, [isLoggedIn, currentUser.id]);
+  }, [isLoggedIn, currentUser.id, getUserSavedIds]);
 
   useEffect(() => {
     loadFeedPosts();
   }, [loadFeedPosts]);
+
+  // Synchronize bookmark states whenever the active user account changes
+  useEffect(() => {
+    const activeUid = isLoggedIn && auth.currentUser ? auth.currentUser.uid : currentUser.id;
+    const savedIds = getUserSavedIds(activeUid);
+    setPosts((prev) =>
+      prev.map((p) => ({
+        ...p,
+        isSaved: savedIds.has(p.id),
+      }))
+    );
+  }, [currentUser.id, isLoggedIn, getUserSavedIds]);
 
   // Like Toggle (Cloud Firestore)
   const handleLikeToggle = async (postId: string) => {
@@ -287,7 +325,21 @@ export default function App() {
     );
 
     try {
-      await toggleLikeInFirestore(postId, currentUser.id, currentlyLiked);
+      const result = await toggleLikeInFirestore(postId, currentUser.id, currentlyLiked);
+      if (result) {
+        setPosts((prevPosts) =>
+          prevPosts.map((p) => {
+            if (p.id === postId) {
+              return {
+                ...p,
+                isLiked: result.nextLiked,
+                likesCount: result.newLikesCount,
+              };
+            }
+            return p;
+          })
+        );
+      }
     } catch (err: any) {
       console.warn('Like toggle sync error in Firestore:', err);
       // Revert optimistic update
@@ -307,15 +359,20 @@ export default function App() {
     }
   };
 
-  // Save / Bookmark Toggle
+  // Save / Bookmark Toggle with persistent user-specific storage
   const handleSaveToggle = (postId: string) => {
-    setPosts((prevPosts) =>
-      prevPosts.map((p) => {
+    const activeUid = isLoggedIn && auth.currentUser ? auth.currentUser.uid : currentUser.id;
+    const savedIds = getUserSavedIds(activeUid);
+
+    setPosts((prevPosts) => {
+      const updated = prevPosts.map((p) => {
         if (p.id === postId) {
           const nextSaved = !p.isSaved;
           if (nextSaved) {
+            savedIds.add(postId);
             showToast(`"${p.title.slice(0, 30)}..." added to saved resources!`);
           } else {
+            savedIds.delete(postId);
             showToast('Removed from saved resources', 'info');
           }
           return {
@@ -325,8 +382,10 @@ export default function App() {
           };
         }
         return p;
-      })
-    );
+      });
+      persistUserSavedIds(activeUid, savedIds);
+      return updated;
+    });
   };
 
   // Real Firebase-backed Follow / Unfollow System (Feature 2)
@@ -737,6 +796,27 @@ export default function App() {
     showToast(`Switched active profile to ${user.name}`);
   };
 
+  const handleUpdateProfile = async (updates: Partial<User>) => {
+    if (!auth.currentUser) {
+      showToast('Please sign in to update your profile.', 'info');
+      return;
+    }
+
+    try {
+      await updateUserProfileInFirestore(auth.currentUser.uid, updates);
+      setCurrentUser((prev) => ({ ...prev, ...updates }));
+      setViewedUser((prev) => (prev.id === auth.currentUser?.uid ? { ...prev, ...updates } : prev));
+      setUsers((prev) =>
+        prev.map((u) => (u.id === auth.currentUser?.uid ? { ...u, ...updates } : u))
+      );
+      showToast('Scholar profile updated successfully!', 'success');
+    } catch (err: any) {
+      console.error('Failed to update profile in Firestore:', err);
+      showToast(`Could not update profile: ${err?.message || 'Error'}`, 'error');
+      throw err;
+    }
+  };
+
   const handleSelectUser = (user: User) => {
     setViewedUser(user);
     setCurrentView('profile');
@@ -1080,7 +1160,7 @@ export default function App() {
           onCancel={() => setCurrentView('landing')}
         />
       ) : (
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 flex-1 w-full pb-24 md:pb-12">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 flex-1 w-full pb-28 md:pb-24">
           <div className="flex gap-6 items-start justify-center">
             
             {/* Desktop Left Sidebar */}
@@ -1189,6 +1269,7 @@ export default function App() {
                   onPreviewMedia={(m) => setPreviewMedia(m)}
                   onToast={showToast}
                   isAdminVerified={isAdminVerified}
+                  onUpdateProfile={handleUpdateProfile}
                 />
               )}
 
@@ -1315,15 +1396,17 @@ export default function App() {
         </div>
       )}
 
-      {/* Mobile Bottom Navigation Bar */}
-      <MobileNav
-        currentView={currentView}
-        onNavigate={(view) => {
-          if (view === 'profile') setViewedUser(currentUser);
-          setCurrentView(view);
-        }}
-        savedCount={savedPostsCount}
-      />
+      {/* Bottom Navigation Bar */}
+      {currentView !== 'landing' && currentView !== 'auth' && (
+        <MobileNav
+          currentView={currentView}
+          onNavigate={(view) => {
+            if (view === 'profile') setViewedUser(currentUser);
+            setCurrentView(view);
+          }}
+          savedCount={savedPostsCount}
+        />
+      )}
     </div>
   );
 }

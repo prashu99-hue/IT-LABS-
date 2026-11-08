@@ -3,7 +3,6 @@ import {
   Sparkles,
   Users,
   Filter,
-  PlusCircle,
   BookOpen,
   Search,
   MessageSquare,
@@ -93,25 +92,6 @@ export const FeedView: React.FC<FeedViewProps> = ({
 
   return (
     <div className="space-y-5">
-      {/* Quick Create Prompt Bar */}
-      <div className="bg-white rounded-2xl border border-slate-200/80 p-4 shadow-xs">
-        <div className="flex items-center gap-3">
-          <img
-            src={currentUser.avatar}
-            alt={currentUser.name}
-            referrerPolicy="no-referrer"
-            className="w-10 h-10 rounded-full object-cover shrink-0 ring-1 ring-slate-200"
-          />
-          <button
-            onClick={onOpenCreate}
-            className="flex-1 text-left px-4 py-2.5 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-xl text-xs text-slate-500 transition-colors flex items-center justify-between"
-          >
-            <span>Share a code snippet, upload lecture notes, or ask a question...</span>
-            <PlusCircle className="w-4 h-4 text-blue-600 shrink-0 ml-2" />
-          </button>
-        </div>
-      </div>
-
       {/* Feed Tabs Header: "For You" vs "Following" */}
       <div className="bg-white rounded-2xl border border-slate-200/80 p-3 shadow-xs">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
@@ -269,12 +249,6 @@ export const FeedView: React.FC<FeedViewProps> = ({
                 className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-xl text-xs font-semibold transition-colors"
               >
                 Reset All Filters
-              </button>
-              <button
-                onClick={onOpenCreate}
-                className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-xl text-xs font-semibold transition-colors"
-              >
-                Create Post
               </button>
             </div>
           </div>

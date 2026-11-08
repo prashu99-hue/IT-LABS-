@@ -13,7 +13,8 @@ import {
   deleteDoc,
   onSnapshot,
   Timestamp,
-  writeBatch
+  writeBatch,
+  runTransaction
 } from 'firebase/firestore';
 import { db, auth } from '../firebase/config';
 import { Post, Comment, User, SubjectCategory, DifficultyLevel, ResourceType, CodeSnippet, MediaAttachment, PostAttachment } from '../types';
@@ -399,6 +400,7 @@ export async function fetchPostsFromFirestore(currentUserId?: string): Promise<P
         return {
           id: cDoc.id,
           postId: docSnap.id,
+          authorId: cData.authorId || 'unknown',
           author: {
             id: cData.authorId || 'unknown',
             name: cData.authorName || 'Member',
@@ -562,13 +564,13 @@ export function subscribeToFeedPosts(
 }
 
 /**
- * Toggle like for a post in Cloud Firestore
- * Creates / deletes /posts/{postId}/likes/{userId} and increments / decrements likesCount
+ * Toggle like for a post in Cloud Firestore using an atomic transaction.
+ * Creates / deletes /posts/{postId}/likes/{userId} and updates likesCount with zero-bound protection.
  */
 export async function toggleLikeInFirestore(
   postId: string,
   currentUserId: string,
-  currentlyLiked: boolean
+  _currentlyLiked?: boolean
 ): Promise<{ nextLiked: boolean; newLikesCount: number }> {
   if (!currentUserId) {
     throw new Error('Please sign in to like educational posts.');
@@ -577,33 +579,45 @@ export async function toggleLikeInFirestore(
   const postDocRef = doc(db, 'posts', postId);
   const likeDocRef = doc(db, 'posts', postId, 'likes', currentUserId);
 
-  if (currentlyLiked) {
-    // User is unliking
-    try {
-      await deleteDoc(likeDocRef);
-      await updateDoc(postDocRef, {
-        likesCount: increment(-1),
-        updatedAt: serverTimestamp(),
-      });
-      return { nextLiked: false, newLikesCount: -1 };
-    } catch (err) {
-      handleFirestoreError(err, OperationType.WRITE, `posts/${postId}/likes/${currentUserId}`);
-    }
-  } else {
-    // User is liking
-    try {
-      await setDoc(likeDocRef, {
-        userId: currentUserId,
-        likedAt: serverTimestamp(),
-      });
-      await updateDoc(postDocRef, {
-        likesCount: increment(1),
-        updatedAt: serverTimestamp(),
-      });
-      return { nextLiked: true, newLikesCount: 1 };
-    } catch (err) {
-      handleFirestoreError(err, OperationType.WRITE, `posts/${postId}/likes/${currentUserId}`);
-    }
+  try {
+    const result = await runTransaction(db, async (transaction) => {
+      const postSnap = await transaction.get(postDocRef);
+      if (!postSnap.exists()) {
+        throw new Error('Educational post not found in Firestore.');
+      }
+
+      const likeSnap = await transaction.get(likeDocRef);
+      const isCurrentlyLiked = likeSnap.exists();
+      const currentCount = typeof postSnap.data()?.likesCount === 'number' ? postSnap.data().likesCount : 0;
+
+      if (isCurrentlyLiked) {
+        // User is unliking
+        const nextCount = Math.max(0, currentCount - 1);
+        transaction.delete(likeDocRef);
+        transaction.update(postDocRef, {
+          likesCount: nextCount,
+          updatedAt: serverTimestamp(),
+        });
+        return { nextLiked: false, newLikesCount: nextCount };
+      } else {
+        // User is liking
+        const nextCount = currentCount + 1;
+        transaction.set(likeDocRef, {
+          userId: currentUserId,
+          likedAt: serverTimestamp(),
+        });
+        transaction.update(postDocRef, {
+          likesCount: nextCount,
+          updatedAt: serverTimestamp(),
+        });
+        return { nextLiked: true, newLikesCount: nextCount };
+      }
+    });
+
+    return result;
+  } catch (err: any) {
+    handleFirestoreError(err, OperationType.WRITE, `posts/${postId}/likes/${currentUserId}`);
+    throw err;
   }
 }
 
@@ -663,6 +677,7 @@ export async function addCommentInFirestore(
   return {
     id: commentId,
     postId,
+    authorId: currentAuthUser.uid,
     author: {
       id: currentAuthUser.uid,
       name: commentPayload.authorName,
@@ -700,10 +715,19 @@ export async function deleteCommentInFirestore(
   const commentDocRef = doc(db, 'posts', postId, 'comments', commentId);
   const postDocRef = doc(db, 'posts', postId);
 
-  // 1. Verify comment existence
+  // 1. Verify comment existence & ownership
   const commentSnap = await getDoc(commentDocRef);
   if (!commentSnap.exists()) {
     return; // Already deleted
+  }
+
+  const commentData = commentSnap.data();
+  const commentAuthorUid = commentData?.authorId;
+  const isAuthor = Boolean(commentAuthorUid && commentAuthorUid === currentAuthUser.uid);
+  const isAdmin = Boolean(currentAuthUser.email && currentAuthUser.email.toLowerCase() === 'ecode2544@gmail.com');
+
+  if (!isAuthor && !isAdmin) {
+    throw new Error('Permission denied: You can only delete your own comments.');
   }
 
   // 2. Safely read parent post to prevent negative commentsCount

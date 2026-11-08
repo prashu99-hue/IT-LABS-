@@ -2,7 +2,6 @@ import React, { useState } from 'react';
 import {
   BookOpen,
   Search,
-  PlusCircle,
   Bookmark,
   Compass,
   Home,
@@ -201,16 +200,6 @@ export const Navbar: React.FC<NavbarProps> = ({
                     Admin
                   </button>
                 </nav>
-
-                {/* Create CTA Button */}
-                <button
-                  onClick={() => onNavigate('create')}
-                  className="flex items-center gap-1.5 px-3.5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-semibold shadow-xs shadow-blue-500/20 transition-all hover:scale-[1.02] active:scale-[0.98]"
-                >
-                  <PlusCircle className="w-4 h-4" />
-                  <span className="hidden sm:inline">Create / Upload</span>
-                  <span className="sm:hidden">Create</span>
-                </button>
 
                 {/* Profile & Role Switcher Dropdown */}
                 <div className="relative">

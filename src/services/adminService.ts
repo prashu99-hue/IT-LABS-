@@ -224,9 +224,8 @@ export async function submitPostReportToFirestore(
     throw new Error('Please provide a reason for reporting this post.');
   }
 
-  const reportsCol = collection(db, 'reports');
-  const reportDocRef = doc(reportsCol);
-  const reportId = reportDocRef.id;
+  const reportId = `report_${postId}_${currentAuthUser.uid}`;
+  const reportDocRef = doc(db, 'reports', reportId);
 
   const newReport: PostReport = {
     id: reportId,
