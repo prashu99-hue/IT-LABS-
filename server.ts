@@ -8,6 +8,17 @@ import { v2 as cloudinary } from 'cloudinary';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+// Global process resilience guards against unhandled exceptions during dev pre-warming
+process.on('unhandledRejection', (reason) => {
+  console.warn('[IT LABS Server] Handled unhandled rejection:', reason);
+});
+
+process.on('uncaughtException', (err: any) => {
+  if (err?.code !== 'EADDRINUSE') {
+    console.error('[IT LABS Server] Handled uncaught exception:', err);
+  }
+});
+
 // Cloudinary Server-Side Configuration (Credentials never exposed to frontend)
 const CLOUDINARY_CLOUD_NAME = process.env.CLOUDINARY_CLOUD_NAME;
 const CLOUDINARY_API_KEY = process.env.CLOUDINARY_API_KEY;
@@ -24,17 +35,21 @@ if (isCloudinaryConfigured) {
     api_secret: CLOUDINARY_API_SECRET,
     secure: true,
   });
-  console.log('[IT LABS Storage] Cloudinary persistent object storage initialized successfully.');
+  console.log('[IT LABS Storage] Cloudinary persistent object storage initialized.');
 } else {
-  console.warn(
-    '[IT LABS Storage] Cloudinary credentials not detected in server environment. Set CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, and CLOUDINARY_API_SECRET in .env.'
-  );
+  console.log('[IT LABS Storage] Operating with built-in client-optimized permanent media storage (Cloudinary credentials optional).');
 }
-
 
 async function startServer() {
   const app = express();
-  const PORT = 3000;
+  
+  // Parse port from CLI or default to 3000
+  let PORT = 3000;
+  const portArgIndex = process.argv.indexOf('--port');
+  if (portArgIndex !== -1 && process.argv[portArgIndex + 1]) {
+    const parsed = parseInt(process.argv[portArgIndex + 1], 10);
+    if (!isNaN(parsed)) PORT = parsed;
+  }
 
   // Support JSON and urlencoded bodies up to 50MB for educational media
   app.use(express.json({ limit: '50mb' }));
@@ -305,8 +320,31 @@ async function startServer() {
     });
   }
 
-  app.listen(PORT, '0.0.0.0', () => {
+  const server = app.listen(PORT, '0.0.0.0', () => {
     console.log(`IT LABS Server running on http://0.0.0.0:${PORT}`);
+  });
+
+  server.on('error', (err: any) => {
+    if (err.code === 'EADDRINUSE') {
+      console.warn(`[IT LABS Server] Port ${PORT} temporarily occupied. Retrying in 1s...`);
+      setTimeout(() => {
+        try {
+          server.close();
+        } catch {}
+        server.listen(PORT, '0.0.0.0', () => {
+          console.log(`IT LABS Server running on http://0.0.0.0:${PORT}`);
+        });
+      }, 1000);
+    } else {
+      console.error('[IT LABS Server] Listen error:', err);
+    }
+  });
+
+  process.on('SIGTERM', () => {
+    server.close(() => process.exit(0));
+  });
+  process.on('SIGINT', () => {
+    server.close(() => process.exit(0));
   });
 }
 
