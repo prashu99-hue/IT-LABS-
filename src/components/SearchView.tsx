@@ -249,7 +249,7 @@ export const SearchView: React.FC<SearchViewProps> = ({
       sizeFormatted,
       url,
       permanentFileUrl: url,
-      storageProvider: att.storageProvider || 'IT LABS Server Storage',
+      storageProvider: att.storageProvider || 'LearnNova Server Storage',
       uploadedAt: att.uploadedAt || 'Recently',
       downloadUrl: att.downloadUrl || url,
       thumbnailUrl: att.thumbnailUrl,

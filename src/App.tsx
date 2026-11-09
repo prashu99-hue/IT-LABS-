@@ -10,8 +10,6 @@ import {
   MediaAttachment
 } from './types';
 import {
-  INITIAL_USERS,
-  CURRENT_USER,
   INITIAL_POSTS
 } from './data/mockData';
 import { Navbar } from './components/Navbar';
@@ -32,7 +30,13 @@ import { ShareModal } from './components/ShareModal';
 import { MediaPreviewModal } from './components/MediaPreviewModal';
 import { FirestoreRulesModal } from './components/FirestoreRulesModal';
 import { Toast, ToastMessage } from './components/Toast';
-import { subscribeToFirebaseAuthState, logoutFirebase, fetchAllUsersFromFirestore, updateUserProfileInFirestore } from './services/authService';
+import {
+  subscribeToFirebaseAuthState,
+  logoutFirebase,
+  fetchAllUsersFromFirestore,
+  subscribeToAllUsersFromFirestore,
+  updateUserProfileInFirestore
+} from './services/authService';
 import {
   followCreatorInFirestore,
   unfollowCreatorInFirestore,
@@ -61,12 +65,29 @@ import {
   PRIMARY_ADMIN_EMAIL
 } from './services/adminService';
 
+const GUEST_USER: User = {
+  id: 'guest',
+  name: 'Guest Learner',
+  username: 'guest',
+  email: '',
+  role: 'student',
+  title: 'Student Scholar',
+  institution: '',
+  bio: '',
+  expertise: [],
+  avatar: 'https://ui-avatars.com/api/?name=Guest+Learner&background=64748b&color=fff',
+  followersCount: 0,
+  followingCount: 0,
+  isVerified: false,
+  isFollowing: false,
+};
+
 export default function App() {
   const [currentView, setCurrentView] = useState<AppView>('landing');
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [isAdminVerified, setIsAdminVerified] = useState(false);
-  const [users, setUsers] = useState<User[]>(INITIAL_USERS);
-  const [currentUser, setCurrentUser] = useState<User>(CURRENT_USER);
+  const [users, setUsers] = useState<User[]>([]);
+  const [currentUser, setCurrentUser] = useState<User>(GUEST_USER);
   const [followedUserIds, setFollowedUserIds] = useState<Set<string>>(new Set());
   const [posts, setPosts] = useState<Post[]>(INITIAL_POSTS);
   const [searchQuery, setSearchQuery] = useState('');
@@ -76,7 +97,7 @@ export default function App() {
   const [reports, setReports] = useState<PostReport[]>([]);
   const [selectedSubject, setSelectedSubject] = useState<SubjectCategory | 'All'>('All');
   const [activeExploreCategory, setActiveExploreCategory] = useState<SubjectCategory | null>(null);
-  const [viewedUser, setViewedUser] = useState<User>(CURRENT_USER);
+  const [viewedUser, setViewedUser] = useState<User>(GUEST_USER);
   const [shareModalPost, setShareModalPost] = useState<Post | null>(null);
   const [previewMedia, setPreviewMedia] = useState<MediaAttachment | null>(null);
   const [rulesModalOpen, setRulesModalOpen] = useState(false);
@@ -178,28 +199,24 @@ export default function App() {
     };
   }, [isLoggedIn, currentUser.id, currentUser.email]);
 
-  // Fetch all registered users from Cloud Firestore for Global Search & Creator Discovery
+  // Live real-time sync of all genuine registered users from Cloud Firestore (/users collection)
   useEffect(() => {
-    async function loadFirestoreUsers() {
-      try {
-        const firestoreUsers = await fetchAllUsersFromFirestore();
-        if (firestoreUsers.length > 0) {
-          setUsers((prev) => {
-            const combined = [...firestoreUsers, ...prev];
-            const seen = new Set<string>();
-            return combined.filter((u) => {
-              if (seen.has(u.id)) return false;
-              seen.add(u.id);
-              return true;
-            });
-          });
-        }
-      } catch (err) {
-        console.warn('Could not load Firestore users:', err);
+    const unsubscribe = subscribeToAllUsersFromFirestore(
+      (firestoreUsers) => {
+        setUsers(
+          firestoreUsers.map((u) => ({
+            ...u,
+            isFollowing: followedUserIds.has(u.id),
+          }))
+        );
+      },
+      (err) => {
+        console.warn('Real-time users sync error:', err);
       }
-    }
-    loadFirestoreUsers();
-  }, []);
+    );
+
+    return () => unsubscribe();
+  }, [followedUserIds]);
 
   // Fetch followed user IDs when signed in to ensure persistence across page refreshes
   useEffect(() => {
@@ -655,7 +672,7 @@ export default function App() {
         targetPost?.title
       );
       // Success toast ONLY shown after Firestore confirms setDoc succeeded
-      showToast('Report submitted for admin review. Thank you for keeping IT LABS safe!', 'info');
+      showToast('Report submitted for admin review. Thank you for keeping LearnNova safe!', 'info');
     } catch (err: any) {
       console.error('Failed to submit report to Firestore:', err);
       const isPermissionDenied =
@@ -717,7 +734,7 @@ export default function App() {
       );
 
       setPosts((prev) => [createdPost, ...prev.filter((p) => p.id !== createdPost.id)]);
-      showToast('Educational post published to IT LABS feed!');
+      showToast('Educational post published to LearnNova feed!');
       setCurrentView('feed');
     } catch (err: any) {
       console.error('Failed to publish post to Firestore:', err);
@@ -762,38 +779,25 @@ export default function App() {
       return [authenticatedUser, ...prev];
     });
     setCurrentView('feed');
-    showToast(`Welcome to IT LABS, ${authenticatedUser.name}!`);
+    showToast(`Welcome to LearnNova, ${authenticatedUser.name}!`);
   };
 
   const handleLogout = async () => {
     try {
       await logoutFirebase();
       setIsLoggedIn(false);
-      setCurrentUser(CURRENT_USER);
+      setCurrentUser(GUEST_USER);
+      setViewedUser(GUEST_USER);
       setCurrentView('landing');
-      showToast('Signed out of IT LABS', 'info');
+      showToast('Signed out of LearnNova', 'info');
     } catch (error) {
       console.error('Logout error:', error);
       setIsLoggedIn(false);
-      setCurrentUser(CURRENT_USER);
+      setCurrentUser(GUEST_USER);
+      setViewedUser(GUEST_USER);
       setCurrentView('landing');
-      showToast('Signed out of IT LABS', 'info');
+      showToast('Signed out of LearnNova', 'info');
     }
-  };
-
-  const handleQuickLogin = (userId: string) => {
-    const target = users.find((u) => u.id === userId) || CURRENT_USER;
-    setCurrentUser(target);
-    setViewedUser(target);
-    setIsLoggedIn(true);
-    setCurrentView('feed');
-    showToast(`Logged in as ${target.name} (${target.role === 'teacher_expert' ? 'Expert' : 'Student'})`);
-  };
-
-  const handleSwitchUser = (user: User) => {
-    setCurrentUser(user);
-    setViewedUser(user);
-    showToast(`Switched active profile to ${user.name}`);
   };
 
   const handleUpdateProfile = async (updates: Partial<User>) => {
@@ -1112,7 +1116,6 @@ export default function App() {
         }}
         currentUser={currentUser}
         users={users}
-        onSwitchUser={handleSwitchUser}
         onOpenSearch={() => setCurrentView('search')}
         searchQuery={searchQuery}
         onSearchChange={(q) => {
@@ -1156,7 +1159,6 @@ export default function App() {
       ) : currentView === 'auth' ? (
         <AuthView
           onAuthenticate={handleAuthenticate}
-          onQuickLogin={handleQuickLogin}
           onCancel={() => setCurrentView('landing')}
         />
       ) : (
@@ -1215,7 +1217,7 @@ export default function App() {
                 <ExploreView
                   activeCategory={activeExploreCategory}
                   onSelectCategory={setActiveExploreCategory}
-                  posts={posts.length > 0 ? posts : INITIAL_POSTS}
+                  posts={posts}
                   creators={users}
                   currentUser={currentUser}
                   onLikeToggle={handleLikeToggle}
@@ -1344,7 +1346,7 @@ export default function App() {
                     </div>
                     <h2 className="text-xl font-bold text-slate-900 mb-2">Admin Access Restricted</h2>
                     <p className="text-sm text-slate-600 max-w-md mx-auto mb-6">
-                      The IT LABS Admin Dashboard is strictly restricted to verified system administrators and appointed moderators.
+                      The LearnNova Admin Dashboard is strictly restricted to verified system administrators and appointed moderators.
                       You are currently active as <span className="font-semibold text-slate-800">{currentUser.name}</span> ({currentUser.email || 'Guest / Unverified User'}).
                     </p>
                     <div className="bg-slate-50 border border-slate-200 rounded-xl p-3.5 max-w-md mx-auto mb-6 text-xs text-slate-600 text-left space-y-1">

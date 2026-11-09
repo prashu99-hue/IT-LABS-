@@ -955,7 +955,7 @@ export const PostCard: React.FC<PostCardProps> = ({
             </button>
           </div>
           <p className="text-xs text-slate-600 mb-2">
-            Help maintain academic standards on IT LABS. What is the issue?
+            Help maintain academic standards on LearnNova. What is the issue?
           </p>
           <div className="flex gap-2">
             <input

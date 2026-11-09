@@ -135,7 +135,7 @@ export async function createPostInFirestore(
       mimeType: att.mimeType || (fileType === 'pdf' ? 'application/pdf' : `application/${extension || 'octet-stream'}`),
       fileSize: size,
       permanentFileUrl,
-      storageProvider: att.storageProvider || 'IT LABS Server Storage',
+      storageProvider: att.storageProvider || 'LearnNova Server Storage',
       uploadedAt: att.uploadedAt || new Date().toISOString(),
       // Rich metadata
       id: att.attachmentId || att.id || `att_${Date.now()}_${idx}`,
@@ -160,7 +160,7 @@ export async function createPostInFirestore(
   const rawPostPayload: Record<string, any> = {
     id: postId,
     authorId: currentAuthUser.uid,
-    authorName: currentUser.name || currentAuthUser.displayName || 'IT LABS Member',
+    authorName: currentUser.name || currentAuthUser.displayName || 'LearnNova Member',
     authorPhoto: currentUser.avatar || currentAuthUser.photoURL || `https://ui-avatars.com/api/?name=${encodeURIComponent(currentUser.name || 'Member')}&background=2563eb&color=fff`,
     authorRole: currentUser.role || 'student',
     authorInstitution: currentUser.institution || 'Tech Academy',
@@ -279,7 +279,7 @@ export function parsePostMedia(data: any): MediaAttachment | undefined {
     fileSize: size,
     sizeFormatted,
     permanentFileUrl: permanentUrl,
-    storageProvider: m.storageProvider || data.storageProvider || 'IT LABS Server Storage',
+    storageProvider: m.storageProvider || data.storageProvider || 'LearnNova Server Storage',
     uploadedAt: m.uploadedAt || 'Recently',
     id,
     resourceId: id,

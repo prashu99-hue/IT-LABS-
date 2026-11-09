@@ -259,9 +259,13 @@ export const CreatorDiscoveryView: React.FC<CreatorDiscoveryViewProps> = ({
             <Users className="w-7 h-7" />
           </div>
           <div>
-            <h3 className="text-base font-bold text-slate-900">No creators found</h3>
+            <h3 className="text-base font-bold text-slate-900">
+              {discoverableCreators.length === 0 ? 'No creators found yet' : 'No matching creators'}
+            </h3>
             <p className="text-xs text-slate-500 max-w-sm mx-auto mt-1">
-              No registered educators or students match your filter criteria. Try adjusting your query or resetting filters.
+              {discoverableCreators.length === 0
+                ? 'No creators found yet. Be the first to share your knowledge!'
+                : 'No registered educators or students match your filter criteria. Try adjusting your query or resetting filters.'}
             </p>
           </div>
           {hasActiveFilters && (

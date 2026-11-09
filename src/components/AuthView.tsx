@@ -23,14 +23,12 @@ import {
 interface AuthViewProps {
   initialMode?: 'login' | 'register';
   onAuthenticate: (user: User) => void;
-  onQuickLogin: (userId: string) => void;
   onCancel: () => void;
 }
 
 export const AuthView: React.FC<AuthViewProps> = ({
   initialMode = 'register',
   onAuthenticate,
-  onQuickLogin,
   onCancel,
 }) => {
   const [mode, setMode] = useState<'login' | 'register'>(initialMode);
@@ -125,11 +123,11 @@ export const AuthView: React.FC<AuthViewProps> = ({
           <div className="w-10 h-10 rounded-xl bg-blue-600 flex items-center justify-center text-white shadow-md shadow-blue-500/20">
             <Layers className="w-6 h-6" />
           </div>
-          <span className="text-2xl font-extrabold text-slate-900 tracking-tight">IT LABS</span>
+          <span className="text-2xl font-extrabold text-slate-900 tracking-tight">LearnNova</span>
         </div>
 
         <h2 className="mt-4 text-center text-2xl font-extrabold text-slate-900 tracking-tight">
-          {mode === 'register' ? 'Join the Educational Network' : 'Welcome back to IT LABS'}
+          {mode === 'register' ? 'Join the Educational Network' : 'Welcome back to LearnNova'}
         </h2>
         <p className="mt-1 text-center text-xs text-slate-500">
           {mode === 'register'
@@ -360,58 +358,12 @@ export const AuthView: React.FC<AuthViewProps> = ({
                 </>
               ) : (
                 <>
-                  <span>{mode === 'register' ? 'Create Account with Firebase' : 'Sign In to IT LABS'}</span>
+                  <span>{mode === 'register' ? 'Create Account with Firebase' : 'Sign In to LearnNova'}</span>
                   <ArrowRight className="w-4 h-4" />
                 </>
               )}
             </button>
           </form>
-
-          {/* Quick Demo Personas (Local Offline Testing Shortcut) */}
-          <div className="mt-8 pt-6 border-t border-slate-100">
-            <div className="flex items-center justify-between mb-3">
-              <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
-                Instant Demo Access (Local Shortcut)
-              </span>
-              <span className="text-[10px] text-blue-600 font-medium">One-click testing</span>
-            </div>
-
-            <div className="space-y-2">
-              <button
-                type="button"
-                onClick={() => onQuickLogin('user-1')}
-                className="w-full flex items-center justify-between p-2.5 rounded-xl border border-slate-200 hover:border-blue-300 hover:bg-blue-50/50 transition-all text-left"
-              >
-                <div className="flex items-center gap-2.5 min-w-0">
-                  <div className="w-8 h-8 rounded-lg bg-blue-600 text-white flex items-center justify-center font-bold text-xs">
-                    EV
-                  </div>
-                  <div className="min-w-0">
-                    <div className="text-xs font-bold text-slate-900">Dr. Elena Vance (Professor)</div>
-                    <div className="text-[11px] text-slate-500">Teacher / Expert Role · AI/ML & Systems</div>
-                  </div>
-                </div>
-                <span className="text-xs font-semibold text-blue-600">Enter →</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => onQuickLogin('user-3')}
-                className="w-full flex items-center justify-between p-2.5 rounded-xl border border-slate-200 hover:border-blue-300 hover:bg-blue-50/50 transition-all text-left"
-              >
-                <div className="flex items-center gap-2.5 min-w-0">
-                  <div className="w-8 h-8 rounded-lg bg-emerald-600 text-white flex items-center justify-center font-bold text-xs">
-                    PS
-                  </div>
-                  <div className="min-w-0">
-                    <div className="text-xs font-bold text-slate-900">Priya Sharma (Senior CS)</div>
-                    <div className="text-[11px] text-slate-500">Student Role · C++ & DSA Learner</div>
-                  </div>
-                </div>
-                <span className="text-xs font-semibold text-blue-600">Enter →</span>
-              </button>
-            </div>
-          </div>
 
           <div className="mt-6 text-center">
             <button

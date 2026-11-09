@@ -72,7 +72,7 @@ export const StorageSettingsModal: React.FC<StorageSettingsModalProps> = ({
       const res = await fetch('/api/health');
       if (res.ok) {
         setTestStatus('success');
-        setTestMessage('IT LABS Server Storage is online and ready for persistent uploads.');
+        setTestMessage('LearnNova Server Storage is online and ready for persistent uploads.');
       } else {
         throw new Error(`Server returned status ${res.status}`);
       }
@@ -99,7 +99,7 @@ export const StorageSettingsModal: React.FC<StorageSettingsModalProps> = ({
                 Persistent Image Storage Settings
               </h3>
               <p className="text-xs text-slate-500">
-                Configure permanent media hosting for IT LABS
+                Configure permanent media hosting for LearnNova
               </p>
             </div>
           </div>

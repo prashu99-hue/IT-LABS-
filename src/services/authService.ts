@@ -12,7 +12,9 @@ import {
   setDoc,
   updateDoc,
   collection,
-  getDocs
+  getDocs,
+  onSnapshot,
+  Unsubscribe
 } from 'firebase/firestore';
 import { auth, db } from '../firebase/config';
 import { User, UserRole } from '../types';
@@ -104,7 +106,7 @@ export async function registerWithFirebase(data: RegistrationData): Promise<User
     title: data.title?.trim() || (data.role === 'teacher_expert' ? 'Verified Instructor / Expert' : 'Computer Science Scholar'),
     institution: data.institution?.trim() || (data.role === 'teacher_expert' ? 'Tech University' : 'Student Scholar'),
     bio: data.bio?.trim() || (data.role === 'teacher_expert'
-      ? 'Passionate educator sharing computer science concepts and industry best practices on IT LABS.'
+      ? 'Passionate educator sharing computer science concepts and industry best practices on LearnNova.'
       : 'Student passionate about computer science, software engineering, and peer problem solving.'),
     expertise: data.expertise && data.expertise.length > 0 ? data.expertise : ['Web Development'],
     avatar,
@@ -160,13 +162,13 @@ export async function loginWithFirebase(email: string, password: string): Promis
   // Fallback: If document does not exist yet, initialize it
   const fallbackUser: User = {
     id: fbUser.uid,
-    name: fbUser.displayName || 'IT LABS Member',
+    name: fbUser.displayName || 'LearnNova Member',
     username: (fbUser.displayName || 'user').toLowerCase().replace(/[^a-z0-9]/g, '_') + '_' + fbUser.uid.substring(0, 4),
     email: fbUser.email || email.trim(),
     role: 'student',
     title: 'Computer Science Scholar',
     institution: 'Tech Academy',
-    bio: 'Passionate learner on IT LABS.',
+    bio: 'Passionate learner on LearnNova.',
     expertise: ['Web Development'],
     avatar: fbUser.photoURL || `https://ui-avatars.com/api/?name=${encodeURIComponent(fbUser.displayName || 'User')}&background=2563eb&color=fff`,
     followersCount: 0,
@@ -247,37 +249,62 @@ export async function getUserProfileFromFirestore(uid: string): Promise<User | n
 }
 
 /**
- * Fetch all public user profiles from Cloud Firestore for global search and discovery
- * Never exposes private emails (Requirement 5)
+ * Map raw Firestore document data to genuine User model.
+ * Never injects dummy titles, institutions, or fake verification badges.
+ */
+function mapFirestoreDocToUser(id: string, data: any): User {
+  const cleanName = data.name || 'Community Member';
+  return {
+    id,
+    name: cleanName,
+    username: data.username || cleanName.toLowerCase().replace(/[^a-z0-9]/g, '_'),
+    email: '', // Never expose private user email in public discovery
+    role: (data.role as UserRole) || 'student',
+    title: data.title || (data.role === 'teacher_expert' ? 'Educator' : 'Student Scholar'),
+    institution: data.institution || '',
+    bio: data.bio || '',
+    expertise: Array.isArray(data.expertise) ? data.expertise : [],
+    avatar: data.avatar || `https://ui-avatars.com/api/?name=${encodeURIComponent(cleanName)}&background=2563eb&color=fff`,
+    followersCount: typeof data.followersCount === 'number' ? data.followersCount : 0,
+    followingCount: typeof data.followingCount === 'number' ? data.followingCount : 0,
+    isVerified: !!data.isVerified,
+    isFollowing: false,
+  };
+}
+
+/**
+ * Fetch all genuine registered user profiles from Cloud Firestore for global search and creator discovery.
  */
 export async function fetchAllUsersFromFirestore(): Promise<User[]> {
   try {
     const usersSnap = await getDocs(collection(db, 'users'));
     if (!usersSnap.empty) {
-      return usersSnap.docs.map((d) => {
-        const data = d.data();
-        return {
-          id: d.id,
-          name: data.name || 'Community Member',
-          username: data.username || (data.name ? data.name.toLowerCase().replace(/[^a-z0-9]/g, '_') : 'member'),
-          email: '', // Never expose private user email in search results
-          role: (data.role as UserRole) || 'student',
-          title: data.title || (data.role === 'teacher_expert' ? 'Verified Tech Specialist' : 'Computer Science Scholar'),
-          institution: data.institution || 'Tech Academy',
-          bio: data.bio || '',
-          expertise: Array.isArray(data.expertise) ? data.expertise : [],
-          avatar: data.avatar || `https://ui-avatars.com/api/?name=${encodeURIComponent(data.name || 'Member')}&background=2563eb&color=fff`,
-          followersCount: typeof data.followersCount === 'number' ? data.followersCount : 0,
-          followingCount: typeof data.followingCount === 'number' ? data.followingCount : 0,
-          isVerified: !!data.isVerified || data.role === 'teacher_expert',
-          isFollowing: false,
-        };
-      });
+      return usersSnap.docs.map((d) => mapFirestoreDocToUser(d.id, d.data()));
     }
   } catch (err) {
     console.warn('Could not query users collection from Firestore:', err);
   }
   return [];
+}
+
+/**
+ * Subscribe to real-time genuine user profiles from Cloud Firestore.
+ */
+export function subscribeToAllUsersFromFirestore(
+  onUpdate: (users: User[]) => void,
+  onError?: (error: any) => void
+): Unsubscribe {
+  return onSnapshot(
+    collection(db, 'users'),
+    (snapshot) => {
+      const users: User[] = snapshot.docs.map((d) => mapFirestoreDocToUser(d.id, d.data()));
+      onUpdate(users);
+    },
+    (err) => {
+      console.warn('Real-time users sync error:', err);
+      if (onError) onError(err);
+    }
+  );
 }
 
 /**
@@ -335,7 +362,7 @@ export function subscribeToFirebaseAuthState(
           role: 'student',
           title: 'Computer Science Scholar',
           institution: 'Tech Academy',
-          bio: 'Passionate learner on IT LABS.',
+          bio: 'Passionate learner on LearnNova.',
           expertise: ['Web Development'],
           avatar: fbUser.photoURL || `https://ui-avatars.com/api/?name=${encodeURIComponent(fbUser.displayName || 'User')}&background=2563eb&color=fff`,
           followersCount: 0,

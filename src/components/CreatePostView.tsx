@@ -982,7 +982,7 @@ export const CreatePostView: React.FC<CreatePostViewProps> = ({
                 ) : (
                   <>
                     <Send className="w-3.5 h-3.5" />
-                    <span>Publish to IT LABS Feed</span>
+                    <span>Publish to LearnNova Feed</span>
                   </>
                 )}
               </button>

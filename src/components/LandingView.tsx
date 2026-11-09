@@ -83,7 +83,7 @@ export const LandingView: React.FC<LandingViewProps> = ({
 
           {/* Subheading */}
           <p className="mt-5 text-base sm:text-lg text-slate-600 max-w-2xl mx-auto leading-relaxed">
-            IT LABS connects students, professors, industry practitioners, and educational creators. 
+            LearnNova connects students, professors, industry practitioners, and educational creators. 
             Discover verified lecture notes, concise code breakdowns, and interactive study roadmaps.
           </p>
 
@@ -208,71 +208,87 @@ export const LandingView: React.FC<LandingViewProps> = ({
             </button>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
-            {creators.slice(0, 6).map((creator) => (
-              <div
-                key={creator.id}
-                className="bg-white rounded-2xl p-5 border border-slate-200/80 shadow-xs hover:border-slate-300 transition-all flex flex-col justify-between"
+          {creators.length === 0 ? (
+            <div className="bg-white rounded-2xl p-10 border border-slate-200/80 text-center shadow-xs">
+              <p className="text-sm font-semibold text-slate-700">
+                No creators found yet. Be the first to share your knowledge!
+              </p>
+              <button
+                type="button"
+                onClick={onGetStarted}
+                className="mt-3 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-xl inline-flex items-center gap-1.5 transition-colors shadow-xs"
               >
-                <div>
-                  <div className="flex items-start gap-3.5">
-                    <img
-                      src={creator.avatar}
-                      alt={creator.name}
-                      referrerPolicy="no-referrer"
-                      className="w-12 h-12 rounded-full object-cover ring-2 ring-slate-100 shrink-0"
-                    />
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-1.5">
-                        <h3 className="font-bold text-sm text-slate-900 truncate">
-                          {creator.name}
-                        </h3>
-                        {creator.isVerified && (
-                          <CheckCircle className="w-3.5 h-3.5 text-blue-600 shrink-0" />
-                        )}
+                Join LearnNova
+                <ArrowRight className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
+              {creators.slice(0, 6).map((creator) => (
+                <div
+                  key={creator.id}
+                  className="bg-white rounded-2xl p-5 border border-slate-200/80 shadow-xs hover:border-slate-300 transition-all flex flex-col justify-between"
+                >
+                  <div>
+                    <div className="flex items-start gap-3.5">
+                      <img
+                        src={creator.avatar}
+                        alt={creator.name}
+                        referrerPolicy="no-referrer"
+                        className="w-12 h-12 rounded-full object-cover ring-2 ring-slate-100 shrink-0"
+                      />
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-1.5">
+                          <h3 className="font-bold text-sm text-slate-900 truncate">
+                            {creator.name}
+                          </h3>
+                          {creator.isVerified && (
+                            <CheckCircle className="w-3.5 h-3.5 text-blue-600 shrink-0" />
+                          )}
+                        </div>
+                        <p className="text-xs font-medium text-slate-500 truncate">
+                          {creator.title}
+                        </p>
+                        <p className="text-[11px] text-blue-600 truncate mt-0.5">
+                          {creator.institution}
+                        </p>
                       </div>
-                      <p className="text-xs font-medium text-slate-500 truncate">
-                        {creator.title}
-                      </p>
-                      <p className="text-[11px] text-blue-600 truncate mt-0.5">
-                        {creator.institution}
-                      </p>
+                    </div>
+
+                    <p className="text-xs text-slate-600 mt-3 line-clamp-2 leading-relaxed">
+                      {creator.bio}
+                    </p>
+
+                    <div className="mt-3 flex items-center gap-1.5 flex-wrap">
+                      {creator.expertise.slice(0, 3).map((tag) => (
+                        <span
+                          key={tag}
+                          className="text-[10px] font-medium text-slate-600 bg-slate-100 px-2 py-0.5 rounded-md"
+                        >
+                          {tag}
+                        </span>
+                      ))}
                     </div>
                   </div>
 
-                  <p className="text-xs text-slate-600 mt-3 line-clamp-2 leading-relaxed">
-                    {creator.bio}
-                  </p>
-
-                  <div className="mt-3 flex items-center gap-1.5 flex-wrap">
-                    {creator.expertise.slice(0, 3).map((tag) => (
-                      <span
-                        key={tag}
-                        className="text-[10px] font-medium text-slate-600 bg-slate-100 px-2 py-0.5 rounded-md"
-                      >
-                        {tag}
-                      </span>
-                    ))}
+                  <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between">
+                    <span className="text-xs text-slate-500 font-medium">
+                      <strong className="text-slate-800 tabular-nums">
+                        {creator.followersCount.toLocaleString()}
+                      </strong>{' '}
+                      followers
+                    </span>
+                    <button
+                      onClick={() => onSelectCreator(creator)}
+                      className="px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-lg text-xs font-semibold transition-colors"
+                    >
+                      View Profile
+                    </button>
                   </div>
                 </div>
-
-                <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between">
-                  <span className="text-xs text-slate-500 font-medium">
-                    <strong className="text-slate-800 tabular-nums">
-                      {creator.followersCount.toLocaleString()}
-                    </strong>{' '}
-                    followers
-                  </span>
-                  <button
-                    onClick={() => onSelectCreator(creator)}
-                    className="px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-lg text-xs font-semibold transition-colors"
-                  >
-                    View Profile
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          )}
         </div>
       </section>
 
@@ -283,7 +299,7 @@ export const LandingView: React.FC<LandingViewProps> = ({
             Ready to elevate your tech knowledge?
           </h2>
           <p className="mt-3 text-sm sm:text-base text-blue-100 max-w-xl mx-auto">
-            Join thousands of passionate engineers and educators sharing code insights every day on IT LABS.
+            Join thousands of passionate engineers and educators sharing code insights every day on LearnNova.
           </p>
           <div className="mt-6 flex flex-col sm:flex-row items-center justify-center gap-3">
             <button
@@ -307,9 +323,9 @@ export const LandingView: React.FC<LandingViewProps> = ({
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row items-center justify-between gap-4">
           <div className="flex items-center gap-2">
             <div className="w-6 h-6 rounded-lg bg-blue-600 text-white flex items-center justify-center font-bold text-xs">
-              IT
+              LN
             </div>
-            <span className="font-bold text-slate-800">IT LABS</span>
+            <span className="font-bold text-slate-800">LearnNova</span>
             <span>— Educational Social Network</span>
           </div>
           <div className="flex items-center gap-6">
@@ -319,7 +335,7 @@ export const LandingView: React.FC<LandingViewProps> = ({
             <span>·</span>
             <span>Grow</span>
           </div>
-          <div>© {new Date().getFullYear()} IT LABS Platform. All rights reserved.</div>
+          <div>© {new Date().getFullYear()} LearnNova Platform. All rights reserved.</div>
         </div>
       </footer>
     </div>

@@ -159,7 +159,7 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
           <div>
             <div className="inline-flex items-center gap-1.5 text-xs font-semibold text-blue-600 uppercase tracking-wider mb-1">
               <ShieldCheck className="w-4 h-4 text-blue-600" />
-              IT LABS Security & Moderation Console
+              LearnNova Security & Moderation Console
             </div>
             <h1 className="text-2xl sm:text-3xl font-extrabold text-slate-900 tracking-tight">
               Platform Governance & Quality Control

@@ -23,7 +23,7 @@ export const ShareModal: React.FC<ShareModalProps> = ({ post, onClose, onToast }
   };
 
   const shareTwitter = () => {
-    const text = encodeURIComponent(`Check out this educational post on IT LABS: "${post.title}" by ${post.author.name}`);
+    const text = encodeURIComponent(`Check out this educational post on LearnNova: "${post.title}" by ${post.author.name}`);
     window.open(`https://twitter.com/intent/tweet?text=${text}&url=${encodeURIComponent(shareUrl)}`, '_blank');
   };
 

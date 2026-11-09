@@ -40,12 +40,12 @@ export async function downloadMediaResource(
           downloadBlob = await res.blob();
         } else {
           // Fallback: If external URL CORS is restricted, create synthetic sample file matching extension
-          const syntheticContent = media.codeContent || `Educational Resource: ${media.originalName}\nPlatform: IT LABS - Learn, Share, Grow\nVerified educational content.`;
+          const syntheticContent = media.codeContent || `Educational Resource: ${media.originalName}\nPlatform: LearnNova - Learn, Share, Grow\nVerified educational content.`;
           downloadBlob = new Blob([syntheticContent], { type: media.mimeType || 'application/octet-stream' });
         }
       } catch {
         // Fallback for CORS
-        const syntheticContent = media.codeContent || `Educational Resource: ${media.originalName}\nPlatform: IT LABS - Learn, Share, Grow`;
+        const syntheticContent = media.codeContent || `Educational Resource: ${media.originalName}\nPlatform: LearnNova - Learn, Share, Grow`;
         downloadBlob = new Blob([syntheticContent], { type: media.mimeType || 'application/octet-stream' });
       }
     }

@@ -301,7 +301,7 @@ async function startServer() {
 
   // Health check endpoint
   app.get('/api/health', (req, res) => {
-    res.json({ status: 'ok', service: 'IT LABS Media Storage Server', timestamp: new Date().toISOString() });
+    res.json({ status: 'ok', service: 'LearnNova Media Storage Server', timestamp: new Date().toISOString() });
   });
 
   // Mount Vite dev server middleware in development

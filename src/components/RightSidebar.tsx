@@ -43,50 +43,58 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({
         </div>
 
         <div className="space-y-3">
-          {followRecommendations.map((creator) => (
-            <div key={creator.id} className="flex items-center justify-between gap-2">
-              <button
-                onClick={() => onSelectUser(creator)}
-                className="flex items-center gap-2.5 min-w-0 text-left group"
-              >
-                <img
-                  src={creator.avatar}
-                  alt={creator.name}
-                  referrerPolicy="no-referrer"
-                  className="w-9 h-9 rounded-full object-cover shrink-0 ring-1 ring-slate-200 group-hover:ring-blue-500 transition-all"
-                />
-                <div className="min-w-0">
-                  <div className="text-xs font-bold text-slate-900 group-hover:text-blue-600 transition-colors truncate">
-                    {creator.name}
+          {followRecommendations.length === 0 ? (
+            <p className="text-xs text-slate-400 py-3 text-center">
+              No creators found yet. Be the first to share your knowledge!
+            </p>
+          ) : (
+            followRecommendations.map((creator) => (
+              <div key={creator.id} className="flex items-center justify-between gap-2">
+                <button
+                  onClick={() => onSelectUser(creator)}
+                  className="flex items-center gap-2.5 min-w-0 text-left group"
+                >
+                  <img
+                    src={creator.avatar}
+                    alt={creator.name}
+                    referrerPolicy="no-referrer"
+                    className="w-9 h-9 rounded-full object-cover shrink-0 ring-1 ring-slate-200 group-hover:ring-blue-500 transition-all"
+                  />
+                  <div className="min-w-0">
+                    <div className="text-xs font-bold text-slate-900 group-hover:text-blue-600 transition-colors truncate">
+                      {creator.name}
+                    </div>
+                    {creator.institution && (
+                      <div className="text-[11px] text-slate-500 truncate">
+                        {creator.institution}
+                      </div>
+                    )}
                   </div>
-                  <div className="text-[11px] text-slate-500 truncate">
-                    {creator.institution}
-                  </div>
-                </div>
-              </button>
+                </button>
 
-              <button
-                onClick={() => onFollowToggle(creator.id)}
-                className={`text-xs font-medium px-2.5 py-1 rounded-lg transition-colors shrink-0 flex items-center gap-1 ${
-                  creator.isFollowing
-                    ? 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                    : 'bg-blue-600 hover:bg-blue-700 text-white'
-                }`}
-              >
-                {creator.isFollowing ? (
-                  <>
-                    <UserCheck className="w-3 h-3" />
-                    <span>Following</span>
-                  </>
-                ) : (
-                  <>
-                    <UserPlus className="w-3 h-3" />
-                    <span>Follow</span>
-                  </>
-                )}
-              </button>
-            </div>
-          ))}
+                <button
+                  onClick={() => onFollowToggle(creator.id)}
+                  className={`text-xs font-medium px-2.5 py-1 rounded-lg transition-colors shrink-0 flex items-center gap-1 ${
+                    creator.isFollowing
+                      ? 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                      : 'bg-blue-600 hover:bg-blue-700 text-white'
+                  }`}
+                >
+                  {creator.isFollowing ? (
+                    <>
+                      <UserCheck className="w-3 h-3" />
+                      <span>Following</span>
+                    </>
+                  ) : (
+                    <>
+                      <UserPlus className="w-3 h-3" />
+                      <span>Follow</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            ))
+          )}
         </div>
       </div>
 

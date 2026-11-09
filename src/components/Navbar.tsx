@@ -21,7 +21,6 @@ interface NavbarProps {
   onNavigate: (view: AppView) => void;
   currentUser: User;
   users: User[];
-  onSwitchUser: (user: User) => void;
   onOpenSearch: () => void;
   isLoggedIn: boolean;
   onToggleAuth: () => void;
@@ -36,7 +35,6 @@ export const Navbar: React.FC<NavbarProps> = ({
   onNavigate,
   currentUser,
   users,
-  onSwitchUser,
   onOpenSearch,
   isLoggedIn,
   onToggleAuth,
@@ -76,7 +74,7 @@ export const Navbar: React.FC<NavbarProps> = ({
               <div>
                 <div className="flex items-center gap-1.5">
                   <span className="text-lg font-extrabold tracking-tight text-slate-900 group-hover:text-blue-600 transition-colors">
-                    IT LABS
+                    LearnNova
                   </span>
                   <span className="text-[10px] uppercase font-bold tracking-wider px-1.5 py-0.5 rounded-md bg-blue-50 text-blue-700 border border-blue-100">
                     Edu
@@ -276,37 +274,6 @@ export const Navbar: React.FC<NavbarProps> = ({
                             Admin Moderation
                           </button>
                         )}
-                      </div>
-
-                      <div className="border-t border-slate-100 pt-1 mt-1">
-                        <div className="px-3 py-1 text-[10px] font-semibold text-slate-400 uppercase tracking-wider">
-                          Switch Role / Demo Persona
-                        </div>
-                        {users.slice(0, 3).map((u) => (
-                          <button
-                            key={u.id}
-                            onClick={() => {
-                              onSwitchUser(u);
-                              setShowUserDropdown(false);
-                            }}
-                            className={`w-full px-3 py-1.5 text-left flex items-center gap-2 hover:bg-blue-50 transition-colors ${
-                              currentUser.id === u.id ? 'bg-blue-50/70 font-semibold text-blue-700' : 'text-slate-700'
-                            }`}
-                          >
-                            <img
-                              src={u.avatar}
-                              alt={u.name}
-                              referrerPolicy="no-referrer"
-                              className="w-5 h-5 rounded-full object-cover"
-                            />
-                            <div className="truncate">
-                              <span className="truncate">{u.name}</span>
-                              <span className="text-[10px] text-slate-400 ml-1">
-                                ({u.role === 'teacher_expert' ? 'Expert' : 'Student'})
-                              </span>
-                            </div>
-                          </button>
-                        ))}
                       </div>
 
                       <div className="border-t border-slate-100 pt-1 mt-1">
