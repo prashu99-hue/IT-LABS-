@@ -2,9 +2,9 @@ import { MediaAttachment, MediaCategory } from '../types';
 
 export const SUPPORTED_EXTENSIONS = {
   image: ['jpg', 'jpeg', 'png', 'webp', 'gif'],
-  video: ['mp4', 'webm'],
+  video: ['mp4', 'webm', 'mov', 'm4v'],
   pdf: ['pdf'],
-  code: ['txt', 'py', 'java', 'c', 'cpp', 'js', 'html', 'css'],
+  code: ['txt', 'py', 'java', 'c', 'cpp', 'js', 'jsx', 'ts', 'tsx', 'html', 'css', 'json', 'sql', 'md'],
 };
 
 export const MAX_FILE_SIZE_BYTES = 50 * 1024 * 1024; // 50 MB limit
@@ -375,7 +375,14 @@ export async function uploadToAppServer(
 
   if (!response.ok) {
     const errText = await response.text();
-    throw new Error(`Server upload failed (${response.status}): ${errText}`);
+    let cleanMessage = errText;
+    try {
+      const parsed = JSON.parse(errText);
+      if (parsed.error) cleanMessage = parsed.error;
+    } catch {
+      // not JSON
+    }
+    throw new Error(cleanMessage);
   }
 
   const data = await response.json();

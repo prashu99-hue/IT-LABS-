@@ -5,7 +5,9 @@ import {
   getDocs,
   setDoc,
   deleteDoc,
-  serverTimestamp
+  serverTimestamp,
+  onSnapshot,
+  Unsubscribe
 } from 'firebase/firestore';
 import { db, auth } from '../firebase/config';
 import { User, UserRole } from '../types';
@@ -308,3 +310,96 @@ export async function getFollowingCountFromFirestore(userId: string): Promise<nu
     return 0;
   }
 }
+
+/**
+ * Real-time listener for user's followers subcollection (/users/{userId}/followers).
+ * Immediately notifies subscribers whenever someone follows or unfollows the user.
+ */
+export function subscribeToFollowersListFromFirestore(
+  userId: string,
+  onUpdate: (followers: User[]) => void,
+  onError?: (err: any) => void
+): Unsubscribe {
+  if (!userId) {
+    onUpdate([]);
+    return () => {};
+  }
+
+  const followersCol = collection(db, 'users', userId, 'followers');
+  return onSnapshot(
+    followersCol,
+    (snap) => {
+      const list: User[] = snap.docs.map((d) => {
+        const data = d.data();
+        return {
+          id: data.userId || d.id,
+          name: data.name || 'Member',
+          username: data.username || 'member',
+          email: '',
+          role: (data.role as UserRole) || 'student',
+          title: data.title || (data.role === 'teacher_expert' ? 'Verified Instructor' : 'Computer Science Scholar'),
+          institution: data.institution || '',
+          bio: data.bio || '',
+          expertise: Array.isArray(data.expertise) ? data.expertise : [],
+          avatar: data.avatar || `https://ui-avatars.com/api/?name=${encodeURIComponent(data.name || 'Member')}&background=2563eb&color=fff`,
+          followersCount: 0,
+          followingCount: 0,
+          isVerified: data.role === 'teacher_expert',
+          isFollowing: false,
+        };
+      });
+      onUpdate(list);
+    },
+    (err) => {
+      console.warn(`[Follow Diagnostic] Real-time followers listener error for ${maskId(userId)}:`, err?.code || err?.message);
+      if (onError) onError(err);
+    }
+  );
+}
+
+/**
+ * Real-time listener for user's following subcollection (/users/{userId}/following).
+ * Immediately notifies subscribers whenever the user follows or unfollows another creator.
+ */
+export function subscribeToFollowingListFromFirestore(
+  userId: string,
+  onUpdate: (following: User[]) => void,
+  onError?: (err: any) => void
+): Unsubscribe {
+  if (!userId) {
+    onUpdate([]);
+    return () => {};
+  }
+
+  const followingCol = collection(db, 'users', userId, 'following');
+  return onSnapshot(
+    followingCol,
+    (snap) => {
+      const list: User[] = snap.docs.map((d) => {
+        const data = d.data();
+        return {
+          id: data.userId || d.id,
+          name: data.name || 'Member',
+          username: data.username || 'member',
+          email: '',
+          role: (data.role as UserRole) || 'student',
+          title: data.title || (data.role === 'teacher_expert' ? 'Verified Instructor' : 'Computer Science Scholar'),
+          institution: data.institution || '',
+          bio: data.bio || '',
+          expertise: Array.isArray(data.expertise) ? data.expertise : [],
+          avatar: data.avatar || `https://ui-avatars.com/api/?name=${encodeURIComponent(data.name || 'Member')}&background=2563eb&color=fff`,
+          followersCount: 0,
+          followingCount: 0,
+          isVerified: data.role === 'teacher_expert',
+          isFollowing: true,
+        };
+      });
+      onUpdate(list);
+    },
+    (err) => {
+      console.warn(`[Follow Diagnostic] Real-time following listener error for ${maskId(userId)}:`, err?.code || err?.message);
+      if (onError) onError(err);
+    }
+  );
+}
+

@@ -412,7 +412,7 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
                       </td>
 
                       <td className="py-3 px-3 font-mono tabular-nums text-slate-700">
-                        {u.followersCount.toLocaleString()}
+                        {(u.followersCount || 0).toLocaleString()}
                       </td>
 
                       <td className="py-3 px-3">

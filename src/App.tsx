@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { ShieldAlert } from 'lucide-react';
 import {
   AppView,
@@ -40,7 +40,9 @@ import {
 import {
   followCreatorInFirestore,
   unfollowCreatorInFirestore,
-  fetchFollowedUserIdsFromFirestore
+  fetchFollowedUserIdsFromFirestore,
+  getFollowerCountFromFirestore,
+  getFollowingCountFromFirestore
 } from './services/followService';
 import { auth } from './firebase/config';
 import {
@@ -82,6 +84,87 @@ const GUEST_USER: User = {
   isFollowing: false,
 };
 
+interface NavigationOptions {
+  replace?: boolean;
+  user?: User;
+  category?: SubjectCategory | null;
+  search?: string;
+}
+
+interface NavHistoryState {
+  view: AppView;
+  userId?: string;
+  user?: User;
+  category?: SubjectCategory | null;
+  search?: string;
+}
+
+function buildNavHash(
+  view: AppView,
+  userId?: string,
+  category?: SubjectCategory | null,
+  search?: string
+): string {
+  let hash = `#/${view}`;
+  const params = new URLSearchParams();
+  if (view === 'profile' && userId && userId !== 'guest') {
+    params.set('user', userId);
+  }
+  if (view === 'explore' && category) {
+    params.set('category', category);
+  }
+  if (view === 'search' && search) {
+    params.set('q', search);
+  }
+  const str = params.toString();
+  return str ? `${hash}?${str}` : hash;
+}
+
+function parseNavHash(hashStr: string): {
+  view: AppView;
+  userId?: string;
+  category?: SubjectCategory | null;
+  search?: string;
+} | null {
+  if (!hashStr || hashStr === '#' || hashStr === '#/') {
+    return null;
+  }
+  const clean = hashStr.startsWith('#/')
+    ? hashStr.slice(2)
+    : hashStr.startsWith('#')
+    ? hashStr.slice(1)
+    : hashStr;
+  const [routePart, queryPart] = clean.split('?');
+  const validViews: AppView[] = [
+    'landing',
+    'auth',
+    'feed',
+    'explore',
+    'creators',
+    'profile',
+    'create',
+    'search',
+    'saved',
+    'admin',
+  ];
+  const view = validViews.find((v) => v === routePart);
+  if (!view) return null;
+
+  let userId: string | undefined;
+  let category: SubjectCategory | null | undefined;
+  let search: string | undefined;
+
+  if (queryPart) {
+    const params = new URLSearchParams(queryPart);
+    if (params.has('user')) userId = params.get('user') || undefined;
+    if (params.has('category'))
+      category = (params.get('category') as SubjectCategory) || null;
+    if (params.has('q')) search = params.get('q') || undefined;
+  }
+
+  return { view, userId, category, search };
+}
+
 export default function App() {
   const [currentView, setCurrentView] = useState<AppView>('landing');
   const [isLoggedIn, setIsLoggedIn] = useState(false);
@@ -117,12 +200,207 @@ export default function App() {
     setToasts((prev) => prev.filter((t) => t.id !== id));
   };
 
-  // Listen to Firebase Auth state changes & sync Firestore profile
+  // Central Navigation Manager with History Stack & Hardware/Browser Back Support
+  const navigateToView = useCallback(
+    (targetView: AppView, options?: NavigationOptions) => {
+      const targetUserId =
+        options?.user?.id ??
+        (targetView === 'profile' ? viewedUser?.id : undefined);
+      const targetCategory =
+        options?.category !== undefined
+          ? options.category
+          : targetView === 'explore'
+          ? activeExploreCategory
+          : null;
+      const targetSearch =
+        options?.search !== undefined
+          ? options.search
+          : targetView === 'search'
+          ? searchQuery
+          : undefined;
+
+      // Prevent duplicate pushState if destination and active parameters are unchanged
+      if (
+        !options?.replace &&
+        targetView === currentView &&
+        (targetView !== 'profile' || targetUserId === viewedUser?.id) &&
+        (targetView !== 'explore' || targetCategory === activeExploreCategory) &&
+        (targetView !== 'search' || targetSearch === searchQuery)
+      ) {
+        return;
+      }
+
+      if (options?.user) {
+        setViewedUser(options.user);
+      }
+      if (options?.category !== undefined) {
+        setActiveExploreCategory(options.category);
+        if (options.category) setSelectedSubject(options.category);
+      }
+      if (options?.search !== undefined) {
+        setSearchQuery(options.search);
+      }
+
+      setCurrentView(targetView);
+
+      const hash = buildNavHash(
+        targetView,
+        targetUserId,
+        targetCategory,
+        targetSearch
+      );
+      const state: NavHistoryState = {
+        view: targetView,
+        userId: targetUserId,
+        user: options?.user,
+        category: targetCategory,
+        search: targetSearch,
+      };
+
+      try {
+        if (options?.replace) {
+          window.history.replaceState(state, '', hash);
+        } else {
+          window.history.pushState(state, '', hash);
+        }
+      } catch {
+        window.location.hash = hash;
+      }
+
+      window.scrollTo({ top: 0, behavior: 'instant' });
+    },
+    [currentView, viewedUser?.id, activeExploreCategory, searchQuery]
+  );
+
+  const navigateToViewRef = useRef(navigateToView);
+  navigateToViewRef.current = navigateToView;
+
+  // In-app Back Navigation Handler (e.g. Profile Back, modal cancel, or hardware back)
+  const handleGoBack = useCallback(() => {
+    if (window.history.length > 1 && window.history.state) {
+      window.history.back();
+    } else {
+      navigateToView(isLoggedIn ? 'feed' : 'landing', { replace: true });
+    }
+  }, [isLoggedIn, navigateToView]);
+
+  // Listen for browser Back/Forward & Android hardware Back button
+  useEffect(() => {
+    const handlePopState = (event: PopStateEvent) => {
+      const state = event.state as NavHistoryState | null;
+      if (state && state.view) {
+        setCurrentView(state.view);
+        if (state.view === 'profile') {
+          if (state.user) {
+            setViewedUser(state.user);
+          } else if (state.userId) {
+            const found = users.find((u) => u.id === state.userId);
+            if (found) {
+              setViewedUser(found);
+            } else if (state.userId === currentUser.id) {
+              setViewedUser(currentUser);
+            }
+          }
+        }
+        if (state.category !== undefined) {
+          setActiveExploreCategory(state.category);
+          if (state.category) setSelectedSubject(state.category);
+        }
+        if (state.search !== undefined) {
+          setSearchQuery(state.search);
+        }
+      } else {
+        const parsed = parseNavHash(window.location.hash);
+        if (parsed) {
+          setCurrentView(parsed.view);
+          if (parsed.view === 'profile' && parsed.userId) {
+            const found = users.find((u) => u.id === parsed.userId);
+            if (found) {
+              setViewedUser(found);
+            } else if (parsed.userId === currentUser.id) {
+              setViewedUser(currentUser);
+            }
+          }
+          if (parsed.category !== undefined) {
+            setActiveExploreCategory(parsed.category);
+            if (parsed.category) setSelectedSubject(parsed.category);
+          }
+          if (parsed.search !== undefined) {
+            setSearchQuery(parsed.search);
+          }
+        } else {
+          setCurrentView(isLoggedIn ? 'feed' : 'landing');
+        }
+      }
+    };
+
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, [users, currentUser, isLoggedIn]);
+
+  // Initial URL hash restoration and root history state synchronization on app mount
+  useEffect(() => {
+    const parsed = parseNavHash(window.location.hash);
+    if (parsed) {
+      setCurrentView(parsed.view);
+      if (parsed.view === 'profile' && parsed.userId) {
+        const found = users.find((u) => u.id === parsed.userId);
+        if (found) {
+          setViewedUser(found);
+        }
+      }
+      if (parsed.category !== undefined) {
+        setActiveExploreCategory(parsed.category);
+        if (parsed.category) setSelectedSubject(parsed.category);
+      }
+      if (parsed.search !== undefined) {
+        setSearchQuery(parsed.search);
+      }
+      const initialHash = buildNavHash(
+        parsed.view,
+        parsed.userId,
+        parsed.category,
+        parsed.search
+      );
+      window.history.replaceState(
+        {
+          view: parsed.view,
+          userId: parsed.userId,
+          category: parsed.category,
+          search: parsed.search,
+        },
+        '',
+        initialHash
+      );
+    } else {
+      const initialView: AppView = isLoggedIn ? 'feed' : 'landing';
+      setCurrentView(initialView);
+      const initialHash = buildNavHash(initialView);
+      window.history.replaceState({ view: initialView }, '', initialHash);
+    }
+  }, []);
+
+  // Listen to Firebase Auth state changes & sync Firestore profile (subscribed ONCE on mount)
   useEffect(() => {
     const unsubscribe = subscribeToFirebaseAuthState((profile, fbUser) => {
       if (fbUser && profile) {
         setCurrentUser(profile);
-        setViewedUser(profile);
+        // Only set viewedUser to logged in profile if currently guest or viewing self.
+        // Never overwrite if another user's profile was opened or specified in the URL!
+        setViewedUser((prev) => {
+          const currentNav = parseNavHash(window.location.hash);
+          if (
+            currentNav?.view === 'profile' &&
+            currentNav.userId &&
+            currentNav.userId !== profile.id
+          ) {
+            return prev;
+          }
+          if (prev && prev.id !== 'guest' && prev.id !== profile.id) {
+            return prev;
+          }
+          return profile;
+        });
         setIsLoggedIn(true);
         setUsers((prev) => {
           if (prev.some((u) => u.id === profile.id)) {
@@ -130,6 +408,16 @@ export default function App() {
           }
           return [profile, ...prev];
         });
+        // If user is currently on landing or auth and no deep route is open, take them to feed
+        const currentHash = window.location.hash;
+        if (
+          !currentHash ||
+          currentHash === '#/' ||
+          currentHash === '#/landing' ||
+          currentHash === '#/auth'
+        ) {
+          navigateToViewRef.current('feed', { replace: true });
+        }
       } else {
         setIsLoggedIn(false);
         setIsAdminVerified(false);
@@ -203,12 +491,49 @@ export default function App() {
   useEffect(() => {
     const unsubscribe = subscribeToAllUsersFromFirestore(
       (firestoreUsers) => {
-        setUsers(
-          firestoreUsers.map((u) => ({
-            ...u,
-            isFollowing: followedUserIds.has(u.id),
-          }))
-        );
+        const mappedUsers = firestoreUsers.map((u) => ({
+          ...u,
+          isFollowing: followedUserIds.has(u.id),
+        }));
+        setUsers(mappedUsers);
+
+        // Keep viewedUser in sync with their latest Firestore profile data
+        setViewedUser((prev) => {
+          if (prev && prev.id !== 'guest') {
+            const updated = mappedUsers.find((u) => u.id === prev.id);
+            if (updated) {
+              return { ...updated, isFollowing: followedUserIds.has(updated.id) };
+            }
+          } else {
+            const currentNav = parseNavHash(window.location.hash);
+            if (currentNav?.view === 'profile' && currentNav.userId) {
+              const matched = mappedUsers.find((u) => u.id === currentNav.userId);
+              if (matched) {
+                return { ...matched, isFollowing: followedUserIds.has(matched.id) };
+              }
+            }
+          }
+          return prev;
+        });
+
+        // Dynamically enrich user follower counts from Firestore subcollections
+        Promise.all(
+          mappedUsers.map(async (u) => {
+            const count = await getFollowerCountFromFirestore(u.id);
+            return { id: u.id, count };
+          })
+        )
+          .then((counts) => {
+            setUsers((prev) =>
+              prev.map((u) => {
+                const match = counts.find((c) => c.id === u.id);
+                return match ? { ...u, followersCount: match.count } : u;
+              })
+            );
+          })
+          .catch((err) => {
+            console.warn('Real-time followers enrichment warning:', err);
+          });
       },
       (err) => {
         console.warn('Real-time users sync error:', err);
@@ -225,11 +550,32 @@ export default function App() {
         try {
           const followedSet = await fetchFollowedUserIdsFromFirestore(auth.currentUser.uid);
           setFollowedUserIds(followedSet);
+          const myFollowers = await getFollowerCountFromFirestore(auth.currentUser.uid);
+
+          setCurrentUser((prev) => ({
+            ...prev,
+            followingCount: followedSet.size,
+            followersCount: myFollowers,
+          }));
+
+          setViewedUser((prev) => {
+            if (prev.id === auth.currentUser?.uid) {
+              return {
+                ...prev,
+                followingCount: followedSet.size,
+                followersCount: myFollowers,
+              };
+            }
+            return prev;
+          });
+
           // Sync with users list
           setUsers((prevUsers) =>
             prevUsers.map((u) => ({
               ...u,
               isFollowing: followedSet.has(u.id),
+              followingCount: u.id === auth.currentUser?.uid ? followedSet.size : u.followingCount,
+              followersCount: u.id === auth.currentUser?.uid ? myFollowers : u.followersCount,
             }))
           );
           // Sync with posts list
@@ -317,7 +663,7 @@ export default function App() {
   const handleLikeToggle = async (postId: string) => {
     if (!isLoggedIn || !auth.currentUser) {
       showToast('Please sign in or register to like educational posts.', 'info');
-      setCurrentView('auth');
+      navigateToView('auth');
       return;
     }
 
@@ -409,7 +755,7 @@ export default function App() {
   const handleFollowToggle = async (userId: string) => {
     if (!isLoggedIn || !auth.currentUser) {
       showToast('Please sign in or register to follow educational creators.', 'info');
-      setCurrentView('auth');
+      navigateToView('auth');
       return;
     }
 
@@ -488,7 +834,7 @@ export default function App() {
       })
     );
 
-    // Optimistically update viewedUser if viewing their profile
+    // Optimistically update viewedUser if viewing their profile or own profile
     if (viewedUser.id === userId) {
       setViewedUser((prev) => ({
         ...prev,
@@ -496,6 +842,13 @@ export default function App() {
         followersCount: nextFollowing
           ? (prev.followersCount || 0) + 1
           : Math.max(0, (prev.followersCount || 1) - 1),
+      }));
+    } else if (viewedUser.id === currentUser.id) {
+      setViewedUser((prev) => ({
+        ...prev,
+        followingCount: nextFollowing
+          ? (prev.followingCount || 0) + 1
+          : Math.max(0, (prev.followingCount || 1) - 1),
       }));
     }
 
@@ -564,7 +917,7 @@ export default function App() {
         })
       );
 
-      // Revert viewedUser if viewing their profile
+      // Revert viewedUser if viewing their profile or own profile
       if (viewedUser.id === userId) {
         setViewedUser((prev) => ({
           ...prev,
@@ -572,6 +925,13 @@ export default function App() {
           followersCount: currentlyFollowing
             ? (prev.followersCount || 0) + 1
             : Math.max(0, (prev.followersCount || 1) - 1),
+        }));
+      } else if (viewedUser.id === currentUser.id) {
+        setViewedUser((prev) => ({
+          ...prev,
+          followingCount: currentlyFollowing
+            ? (prev.followingCount || 0) + 1
+            : Math.max(0, (prev.followingCount || 1) - 1),
         }));
       }
 
@@ -596,7 +956,7 @@ export default function App() {
   const handleAddComment = async (postId: string, text: string) => {
     if (!isLoggedIn || !auth.currentUser) {
       showToast('Please sign in or register to join community discussions.', 'info');
-      setCurrentView('auth');
+      navigateToView('auth');
       return;
     }
 
@@ -625,7 +985,7 @@ export default function App() {
   const handleDeleteComment = async (postId: string, commentId: string) => {
     if (!isLoggedIn || !auth.currentUser) {
       showToast('Please sign in to manage comments.', 'info');
-      setCurrentView('auth');
+      navigateToView('auth');
       return;
     }
 
@@ -657,7 +1017,7 @@ export default function App() {
   const handleReportPost = async (postId: string, reason: string) => {
     if (!isLoggedIn || !auth.currentUser) {
       showToast('Please sign in or register to report content.', 'info');
-      setCurrentView('auth');
+      navigateToView('auth');
       return;
     }
 
@@ -710,7 +1070,7 @@ export default function App() {
   ) => {
     if (!isLoggedIn || !auth.currentUser) {
       showToast('Please sign in or register to publish educational notes to Firestore.', 'error');
-      setCurrentView('auth');
+      navigateToView('auth');
       return;
     }
 
@@ -735,7 +1095,7 @@ export default function App() {
 
       setPosts((prev) => [createdPost, ...prev.filter((p) => p.id !== createdPost.id)]);
       showToast('Educational post published to LearnNova feed!');
-      setCurrentView('feed');
+      navigateToView('feed');
     } catch (err: any) {
       console.error('Failed to publish post to Firestore:', err);
       const isPermissionDenied =
@@ -778,7 +1138,7 @@ export default function App() {
       }
       return [authenticatedUser, ...prev];
     });
-    setCurrentView('feed');
+    navigateToView('feed');
     showToast(`Welcome to LearnNova, ${authenticatedUser.name}!`);
   };
 
@@ -788,14 +1148,14 @@ export default function App() {
       setIsLoggedIn(false);
       setCurrentUser(GUEST_USER);
       setViewedUser(GUEST_USER);
-      setCurrentView('landing');
+      navigateToView('landing', { replace: true });
       showToast('Signed out of LearnNova', 'info');
     } catch (error) {
       console.error('Logout error:', error);
       setIsLoggedIn(false);
       setCurrentUser(GUEST_USER);
       setViewedUser(GUEST_USER);
-      setCurrentView('landing');
+      navigateToView('landing', { replace: true });
       showToast('Signed out of LearnNova', 'info');
     }
   };
@@ -822,16 +1182,11 @@ export default function App() {
   };
 
   const handleSelectUser = (user: User) => {
-    setViewedUser(user);
-    setCurrentView('profile');
+    navigateToView('profile', { user });
   };
 
   const handleSelectCategory = (category: SubjectCategory | null) => {
-    setActiveExploreCategory(category);
-    if (category) {
-      setSelectedSubject(category);
-    }
-    setCurrentView('explore');
+    navigateToView('explore', { category });
   };
 
   // Admin actions: Educator Verification Badge (Firestore-backed)
@@ -1111,22 +1466,25 @@ export default function App() {
       <Navbar
         currentView={currentView}
         onNavigate={(view) => {
-          if (view === 'profile') setViewedUser(currentUser);
-          setCurrentView(view);
+          if (view === 'profile') {
+            navigateToView('profile', { user: currentUser });
+          } else {
+            navigateToView(view);
+          }
         }}
         currentUser={currentUser}
         users={users}
-        onOpenSearch={() => setCurrentView('search')}
+        onOpenSearch={() => navigateToView('search')}
         searchQuery={searchQuery}
         onSearchChange={(q) => {
           setSearchQuery(q);
           if (currentView !== 'search') {
-            setCurrentView('search');
+            navigateToView('search', { search: q });
           }
         }}
         onSearchSubmit={(q) => {
           setSearchQuery(q);
-          setCurrentView('search');
+          navigateToView('search', { search: q });
         }}
         isLoggedIn={isLoggedIn}
         isAdminVerified={isAdminVerified}
@@ -1134,7 +1492,7 @@ export default function App() {
           if (isLoggedIn) {
             handleLogout();
           } else {
-            setCurrentView('auth');
+            navigateToView('auth');
           }
         }}
       />
@@ -1143,23 +1501,20 @@ export default function App() {
       {currentView === 'landing' ? (
         <LandingView
           creators={users}
-          onGetStarted={() => setCurrentView('auth')}
-          onLogin={() => setCurrentView('auth')}
+          onGetStarted={() => navigateToView('auth')}
+          onLogin={() => navigateToView('auth')}
           onSelectCategory={(cat) => {
-            setActiveExploreCategory(cat);
-            setSelectedSubject(cat);
-            setCurrentView('explore');
+            navigateToView('explore', { category: cat });
           }}
           onSelectCreator={(u) => {
-            setViewedUser(u);
-            setCurrentView('profile');
+            navigateToView('profile', { user: u });
           }}
-          onExploreFeed={() => setCurrentView('feed')}
+          onExploreFeed={() => navigateToView('feed')}
         />
       ) : currentView === 'auth' ? (
         <AuthView
           onAuthenticate={handleAuthenticate}
-          onCancel={() => setCurrentView('landing')}
+          onCancel={handleGoBack}
         />
       ) : (
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 flex-1 w-full pb-28 md:pb-24">
@@ -1169,14 +1524,17 @@ export default function App() {
             <Sidebar
               currentView={currentView}
               onNavigate={(v) => {
-                if (v === 'profile') setViewedUser(currentUser);
-                setCurrentView(v);
+                if (v === 'profile') {
+                  navigateToView('profile', { user: currentUser });
+                } else {
+                  navigateToView(v);
+                }
               }}
               currentUser={currentUser}
               selectedSubject={selectedSubject}
               onSelectSubject={(subj) => {
                 setSelectedSubject(subj);
-                if (currentView !== 'feed') setCurrentView('feed');
+                if (currentView !== 'feed') navigateToView('feed');
               }}
               savedCount={savedPostsCount}
               isAdminVerified={isAdminVerified}
@@ -1202,14 +1560,14 @@ export default function App() {
                   onDeleteAttachment={handleDeleteAttachment}
                   onSelectUser={handleSelectUser}
                   onSelectCategory={handleSelectCategory}
-                  onOpenCreate={() => setCurrentView('create')}
+                  onOpenCreate={() => navigateToView('create')}
                   onPreviewMedia={(m) => setPreviewMedia(m)}
                   onToast={showToast}
                   isLoading={isFeedLoading}
                   error={feedError}
                   onRetry={loadFeedPosts}
                   followedUserIds={followedUserIds}
-                  onDiscoverCreators={() => setCurrentView('creators')}
+                  onDiscoverCreators={() => navigateToView('creators')}
                 />
               )}
 
@@ -1267,7 +1625,7 @@ export default function App() {
                   onDeleteAttachment={handleDeleteAttachment}
                   onSelectUser={handleSelectUser}
                   onSelectCategory={handleSelectCategory}
-                  onBackToFeed={() => setCurrentView('feed')}
+                  onBackToFeed={handleGoBack}
                   onPreviewMedia={(m) => setPreviewMedia(m)}
                   onToast={showToast}
                   isAdminVerified={isAdminVerified}
@@ -1281,10 +1639,10 @@ export default function App() {
                   isAuthenticated={!!auth.currentUser}
                   onSignIn={() => {
                     showToast('Please sign in or register to publish to Cloud Firestore', 'info');
-                    setCurrentView('auth');
+                    navigateToView('auth');
                   }}
                   onPublishPost={handlePublishPost}
-                  onCancel={() => setCurrentView('feed')}
+                  onCancel={handleGoBack}
                   isPublishing={isPublishing}
                 />
               )}
@@ -1329,8 +1687,7 @@ export default function App() {
                   onSelectUser={handleSelectUser}
                   onSelectCategory={handleSelectCategory}
                   onExplore={() => {
-                    setActiveExploreCategory(null);
-                    setCurrentView('explore');
+                    navigateToView('explore', { category: null });
                   }}
                   onPreviewMedia={(m) => setPreviewMedia(m)}
                   onToast={showToast}
@@ -1356,7 +1713,7 @@ export default function App() {
                       <p>• Client-side role spoofing is strictly rejected by Firestore security rules.</p>
                     </div>
                     <button
-                      onClick={() => setCurrentView('feed')}
+                      onClick={() => navigateToView('feed')}
                       className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-sm font-semibold transition-colors shadow-sm"
                     >
                       Return to Home Feed
@@ -1390,7 +1747,7 @@ export default function App() {
               onSelectUser={handleSelectUser}
               onSelectSubject={(subj) => {
                 setSelectedSubject(subj);
-                setCurrentView('feed');
+                navigateToView('feed');
               }}
             />
 
@@ -1403,8 +1760,11 @@ export default function App() {
         <MobileNav
           currentView={currentView}
           onNavigate={(view) => {
-            if (view === 'profile') setViewedUser(currentUser);
-            setCurrentView(view);
+            if (view === 'profile') {
+              navigateToView('profile', { user: currentUser });
+            } else {
+              navigateToView(view);
+            }
           }}
           savedCount={savedPostsCount}
         />

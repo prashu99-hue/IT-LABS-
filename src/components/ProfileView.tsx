@@ -21,8 +21,11 @@ import {
   Save
 } from 'lucide-react';
 import { User, Post, SubjectCategory, MediaAttachment } from '../types';
+import {
+  subscribeToFollowersListFromFirestore,
+  subscribeToFollowingListFromFirestore
+} from '../services/followService';
 import { PostCard } from './PostCard';
-import { fetchFollowersListFromFirestore, fetchFollowingListFromFirestore } from '../services/followService';
 
 interface ProfileViewProps {
   user: User;
@@ -75,6 +78,11 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
   const [followersList, setFollowersList] = useState<User[]>([]);
   const [followingList, setFollowingList] = useState<User[]>([]);
   const [isLoadingLists, setIsLoadingLists] = useState(false);
+
+  // Reset tab to posts whenever navigating to a different user profile
+  useEffect(() => {
+    setProfileTab('posts');
+  }, [user.id]);
 
   // Edit Profile modal state
   const [isEditingProfile, setIsEditingProfile] = useState(false);
@@ -140,42 +148,55 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
   const resourcePosts = userPosts.filter((p) => !!p.resourceUrl || (p.attachments && p.attachments.length > 0));
   const savedPosts = allPosts.filter((p) => p.isSaved);
 
-  // Load followers and following lists when switching to those tabs or user changes
+  // Real-time synchronization of followers and following lists directly from Cloud Firestore subcollections
   useEffect(() => {
     let isMounted = true;
-    async function loadLists() {
-      setIsLoadingLists(true);
-      try {
-        const [followers, following] = await Promise.all([
-          fetchFollowersListFromFirestore(user.id),
-          fetchFollowingListFromFirestore(user.id),
-        ]);
+    setIsLoadingLists(true);
 
+    const enrichUser = (u: User) => {
+      const found = creators.find((c) => c.id === u.id);
+      if (found) {
+        return { ...found, ...u };
+      }
+      return u;
+    };
+
+    const unsubFollowers = subscribeToFollowersListFromFirestore(
+      user.id,
+      (followers) => {
         if (isMounted) {
-          // Merge with any known creators for enriched metadata if needed
-          const enrichUser = (u: User) => {
-            const found = creators.find((c) => c.id === u.id);
-            if (found) {
-              return { ...found, ...u };
-            }
-            return u;
-          };
-
           setFollowersList(followers.map(enrichUser));
-          setFollowingList(following.map(enrichUser));
+          setIsLoadingLists(false);
         }
-      } catch (err) {
-        console.warn('Could not load followers/following lists:', err);
-      } finally {
+      },
+      (err) => {
+        console.warn('Error loading real-time followers in ProfileView:', err);
         if (isMounted) setIsLoadingLists(false);
       }
-    }
+    );
 
-    loadLists();
+    const unsubFollowing = subscribeToFollowingListFromFirestore(
+      user.id,
+      (following) => {
+        if (isMounted) {
+          setFollowingList(following.map(enrichUser));
+        }
+      },
+      (err) => {
+        console.warn('Error loading real-time following in ProfileView:', err);
+      }
+    );
+
     return () => {
       isMounted = false;
+      unsubFollowers();
+      unsubFollowing();
     };
   }, [user.id, creators]);
+
+  // Genuine counts sourced directly from Cloud Firestore subcollections
+  const actualFollowersCount = followersList.length;
+  const actualFollowingCount = followingList.length;
 
   return (
     <div className="space-y-6">
@@ -190,7 +211,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
               onClick={onBackToFeed}
               className="px-3.5 py-1.5 bg-black/40 hover:bg-black/60 text-white rounded-xl text-xs backdrop-blur-md transition-colors font-medium flex items-center gap-1.5"
             >
-              <span>← Back to Feed</span>
+              <span>← Back</span>
             </button>
           </div>
         </div>
@@ -314,7 +335,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                 className="hover:text-blue-600 transition-colors text-left"
               >
                 <strong className="text-slate-900 text-sm font-bold tabular-nums">
-                  {(user.followersCount || 0).toLocaleString()}
+                  {isLoadingLists ? '...' : actualFollowersCount.toLocaleString()}
                 </strong>{' '}
                 Followers
               </button>
@@ -324,7 +345,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                 className="hover:text-blue-600 transition-colors text-left"
               >
                 <strong className="text-slate-900 text-sm font-bold tabular-nums">
-                  {(user.followingCount || 0).toLocaleString()}
+                  {isLoadingLists ? '...' : actualFollowingCount.toLocaleString()}
                 </strong>{' '}
                 Following
               </button>
@@ -389,7 +410,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
           }`}
         >
           <Users className="w-3.5 h-3.5" />
-          <span>Followers ({user.followersCount || followersList.length})</span>
+          <span>Followers</span>
         </button>
 
         <button
@@ -401,7 +422,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
           }`}
         >
           <UserCheck className="w-3.5 h-3.5" />
-          <span>Following ({user.followingCount || followingList.length})</span>
+          <span>Following</span>
         </button>
 
         {isSelf && (

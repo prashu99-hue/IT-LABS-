@@ -1,44 +1,27 @@
+import 'dotenv/config';
 import express from 'express';
 import { createServer as createViteServer } from 'vite';
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
-import { v2 as cloudinary } from 'cloudinary';
+import { configureCloudinary, getCloudinaryStatus } from './src/server/cloudinaryConfig';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 // Global process resilience guards against unhandled exceptions during dev pre-warming
 process.on('unhandledRejection', (reason) => {
-  console.warn('[IT LABS Server] Handled unhandled rejection:', reason);
+  console.warn('[LearnNova Server] Handled unhandled rejection:', reason);
 });
 
 process.on('uncaughtException', (err: any) => {
   if (err?.code !== 'EADDRINUSE') {
-    console.error('[IT LABS Server] Handled uncaught exception:', err);
+    console.error('[LearnNova Server] Handled uncaught exception:', err);
   }
 });
 
-// Cloudinary Server-Side Configuration (Credentials never exposed to frontend)
-const CLOUDINARY_CLOUD_NAME = process.env.CLOUDINARY_CLOUD_NAME;
-const CLOUDINARY_API_KEY = process.env.CLOUDINARY_API_KEY;
-const CLOUDINARY_API_SECRET = process.env.CLOUDINARY_API_SECRET;
-
-const isCloudinaryConfigured = Boolean(
-  CLOUDINARY_CLOUD_NAME && CLOUDINARY_API_KEY && CLOUDINARY_API_SECRET
-);
-
-if (isCloudinaryConfigured) {
-  cloudinary.config({
-    cloud_name: CLOUDINARY_CLOUD_NAME,
-    api_key: CLOUDINARY_API_KEY,
-    api_secret: CLOUDINARY_API_SECRET,
-    secure: true,
-  });
-  console.log('[IT LABS Storage] Cloudinary persistent object storage initialized.');
-} else {
-  console.log('[IT LABS Storage] Operating with built-in client-optimized permanent media storage (Cloudinary credentials optional).');
-}
+// Initialize Cloudinary securely using the server-side utility
+const { client: cloudinary, isConfigured: isCloudinaryConfigured, status: cloudinaryStatus } = configureCloudinary();
 
 async function startServer() {
   const app = express();
@@ -71,29 +54,24 @@ async function startServer() {
     }
   }));
 
-  // Storage status endpoint (reports whether Cloudinary is active without revealing secrets)
+  // Storage status endpoint (reports whether Cloudinary or Local Storage is active)
   app.get('/api/storage-status', (req, res) => {
+    const currentStatus = getCloudinaryStatus();
     res.json({
-      configured: isCloudinaryConfigured,
-      provider: isCloudinaryConfigured ? 'Cloudinary Cloud Storage' : 'Not Configured',
-      cloudName: CLOUDINARY_CLOUD_NAME ? `${CLOUDINARY_CLOUD_NAME.substring(0, 3)}***` : null,
+      configured: true,
+      provider: currentStatus.isConfigured ? 'Cloudinary Cloud Storage' : 'Local Persistent Storage',
+      cloudName: currentStatus.cloudName ? `${currentStatus.cloudName.substring(0, 3)}***` : null,
+      hasSecret: currentStatus.hasSecret,
     });
   });
 
-  // Cloudinary Signed Upload Route for Images, Videos, PDFs, and Code
+  // Signed / Local Media Upload Route for Images, Videos, PDFs, and Code
   const handleMediaUpload = async (req: express.Request, res: express.Response) => {
     try {
       const { fileData, fileName, mimeType, category } = req.body;
 
       if (!fileData) {
         return res.status(400).json({ success: false, error: 'No file data received' });
-      }
-
-      if (!isCloudinaryConfigured) {
-        return res.status(503).json({
-          success: false,
-          error: 'Cloudinary storage credentials are not configured on the server. Please add CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, and CLOUDINARY_API_SECRET to your .env file.',
-        });
       }
 
       // Determine extension and resource_type
@@ -108,41 +86,96 @@ async function startServer() {
       let resourceType: 'image' | 'video' | 'raw' = 'raw';
       if (['jpg', 'jpeg', 'png', 'webp', 'gif', 'svg'].includes(extension) || detectedMime.includes('image')) {
         resourceType = 'image';
-      } else if (['mp4', 'webm', 'mov'].includes(extension) || detectedMime.includes('video')) {
+      } else if (['mp4', 'webm', 'mov', 'm4v'].includes(extension) || detectedMime.includes('video')) {
         resourceType = 'video';
       } else {
         resourceType = 'raw';
       }
 
-      // Execute signed upload using official Cloudinary SDK
-      const uploadRes = await cloudinary.uploader.upload(fileData, {
-        resource_type: resourceType,
-        folder: 'it_labs_media',
-        use_filename: true,
-        unique_filename: true,
-        overwrite: false,
-      });
+      // 1. If Cloudinary credentials are configured, attempt upload to Cloudinary
+      if (isCloudinaryConfigured) {
+        try {
+          const uploadRes = await cloudinary.uploader.upload(fileData, {
+            resource_type: resourceType,
+            folder: 'it_labs_media',
+            use_filename: true,
+            unique_filename: true,
+            overwrite: false,
+          });
+
+          return res.json({
+            success: true,
+            url: uploadRes.secure_url,
+            permanentFileUrl: uploadRes.secure_url,
+            cloudinaryPublicId: uploadRes.public_id,
+            cloudinaryResourceType: uploadRes.resource_type,
+            format: uploadRes.format || extension,
+            fileName: fileName || `${uploadRes.public_id}.${uploadRes.format || extension}`,
+            originalName: fileName || `${uploadRes.public_id}.${uploadRes.format || extension}`,
+            size: uploadRes.bytes || 0,
+            mimeType: detectedMime,
+            extension: uploadRes.format || extension,
+            category: category || (resourceType === 'image' ? 'image' : resourceType === 'video' ? 'video' : extension === 'pdf' ? 'pdf' : 'code'),
+            storageProvider: 'Cloudinary Cloud Storage',
+          });
+        } catch (cErr: any) {
+          console.warn('[Storage Diagnostic] Cloudinary upload encountered an issue, seamlessly falling back to local persistent storage:', cErr?.message || cErr);
+          // Smoothly fall through to persistent local storage below
+        }
+      }
+
+      // 2. Local Persistent Storage (public/uploads/)
+      // Extract binary buffer from base64 Data URL (e.g. data:application/pdf;base64,...) or raw string
+      let buffer: Buffer;
+      if (fileData.startsWith('data:')) {
+        const commaIdx = fileData.indexOf(',');
+        const base64Content = commaIdx !== -1 ? fileData.slice(commaIdx + 1) : fileData;
+        buffer = Buffer.from(base64Content, 'base64');
+      } else {
+        buffer = Buffer.from(fileData, 'base64');
+      }
+
+      // Sanitize original file name to prevent directory traversal
+      const safeOriginal = (fileName || `media_${Date.now()}.${extension}`)
+        .replace(/[^a-zA-Z0-9._-]/g, '_')
+        .slice(-80);
+      const uniqueFileName = `${Date.now()}_${Math.random().toString(36).substring(2, 8)}_${safeOriginal}`;
+      const filePath = path.join(uploadsDir, uniqueFileName);
+
+      await fs.promises.writeFile(filePath, buffer);
+
+      const fileUrl = `/uploads/${uniqueFileName}`;
+      const categoryDetermined =
+        category ||
+        (resourceType === 'image'
+          ? 'image'
+          : resourceType === 'video'
+          ? 'video'
+          : extension === 'pdf'
+          ? 'pdf'
+          : 'code');
+
+      console.log(`[Storage Diagnostic] Saved ${categoryDetermined} file: ${uniqueFileName} (${buffer.length} bytes) to /uploads/`);
 
       return res.json({
         success: true,
-        url: uploadRes.secure_url,
-        permanentFileUrl: uploadRes.secure_url,
-        cloudinaryPublicId: uploadRes.public_id,
-        cloudinaryResourceType: uploadRes.resource_type,
-        format: uploadRes.format || extension,
-        fileName: fileName || `${uploadRes.public_id}.${uploadRes.format || extension}`,
-        originalName: fileName || `${uploadRes.public_id}.${uploadRes.format || extension}`,
-        size: uploadRes.bytes || 0,
+        url: fileUrl,
+        permanentFileUrl: fileUrl,
+        fileName: uniqueFileName,
+        originalName: fileName || uniqueFileName,
+        size: buffer.length,
         mimeType: detectedMime,
-        extension: uploadRes.format || extension,
-        category: resourceType === 'image' ? 'image' : resourceType === 'video' ? 'video' : extension === 'pdf' ? 'pdf' : 'code',
-        storageProvider: 'Cloudinary Cloud Storage',
+        extension,
+        category: categoryDetermined,
+        storageProvider: isCloudinaryConfigured
+          ? 'Local Persistent Storage (Cloudinary Fallback)'
+          : 'Local Persistent Storage',
       });
     } catch (err: any) {
-      console.error('Cloudinary media upload handler error:', err);
+      console.error('Media upload handler error:', err);
       return res.status(500).json({
         success: false,
-        error: err.message || 'Failed to upload media to Cloudinary cloud storage',
+        error: err.message || 'Failed to upload educational media file',
       });
     }
   };
